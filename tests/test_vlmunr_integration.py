@@ -65,6 +65,22 @@ def make_stk_state(n):
                       "arch": {"elements": []}}}
 
 
+def make_stk_state_with_floor(n, half=5.0):
+    """stk state with a square floor footprint of HSM x,z in [-half, half].
+    On-disk arch points store [-x, 0, z], so a symmetric room is symmetric on disk."""
+    state = make_stk_state(n)
+    floor_points = [
+        [-half, 0, -half],
+        [half, 0, -half],
+        [half, 0, half],
+        [-half, 0, half],
+    ]
+    state["scene"]["arch"]["elements"] = [
+        {"id": "floor_0", "type": "Floor", "points": floor_points, "roomId": "0"},
+    ]
+    return state
+
+
 def make_hsm_state(n, as_dict=True):
     objs = []
     for i in range(n):
@@ -108,6 +124,70 @@ def test_phase_levels():
     assert grid[0] == (0, 0)
     with pytest.raises(ValueError):
         cfg.phase_levels("9z")
+
+
+# ===========================================================================
+# (a') Factor levels match paper Table 1 + new phases
+# ===========================================================================
+
+def test_factor_level_counts():
+    assert len(cfg.RESOLUTIONS) == 9
+    assert len(cfg.FOCAL_LENGTHS) == 7
+    assert len(cfg.PITCHES) == 7
+    assert len(cfg.YAWS) == 8
+    assert len(cfg.BACKGROUND_GRAYS) == 6
+    assert len(cfg.BACKGROUND_CHROMATIC) == 3
+
+
+def test_factor_level_values():
+    assert cfg.RESOLUTIONS == [196, 224, 256, 336, 384, 448, 512, 768, 1024]
+    assert cfg.FOCAL_LENGTHS == [16, 24, 35, 50, 85, 100, 200]
+    assert cfg.BACKGROUND_GRAYS == [0, 65, 128, 186, 204, 255]
+    assert cfg.BACKGROUND_CHROMATIC == [(255, 0, 0), (0, 255, 0), (0, 0, 255)]
+    assert cfg.PITCHES == [0, 15, 30, 45, 60, 75, 90]
+    assert cfg.YAWS == [0, 45, 90, 135, 180, 225, 270, 315]
+    assert len(cfg.HDRIS) == 8
+    assert cfg.FLOOR_TEXTURE_BACKGROUND == "floor_texture"
+    assert cfg.BASELINE_YAW_PITCH == 45
+
+
+def test_phase_levels_chroma():
+    spec = cfg.phase_levels("1b_chroma")
+    assert spec["vary"] == "background"
+    assert spec["levels"] == [(255, 0, 0), (0, 255, 0), (0, 0, 255)]
+    assert len(spec["levels"]) == 3
+
+
+def test_phase_levels_2_yaw():
+    spec = cfg.phase_levels("2_yaw")
+    assert spec["vary"] == "yaw"
+    assert spec["pitch"] == 45
+    assert spec["levels"] == cfg.YAWS
+    assert len(spec["levels"]) == 8
+
+
+def test_phase_levels_2_pitch():
+    spec = cfg.phase_levels("2_pitch")
+    assert spec["vary"] == "pitch"
+    assert spec["yaw"] == 0
+    assert spec["levels"] == cfg.PITCHES
+    assert len(spec["levels"]) == 7
+
+
+def test_phase_levels_dict_shape_preserved():
+    # phase_levels still returns a DICT with the documented keys for every phase.
+    for ph in cfg.ALL_PHASES:
+        spec = cfg.phase_levels(ph)
+        assert isinstance(spec, dict)
+        for key in ("resolution", "focal_length", "background", "hdri", "pitch", "yaw", "vary", "levels"):
+            assert key in spec
+
+
+def test_all_phases_list():
+    assert "1b_chroma" in cfg.ALL_PHASES
+    assert "2_pitch" in cfg.ALL_PHASES
+    assert "2_yaw" in cfg.ALL_PHASES
+    assert "2" in cfg.ALL_PHASES  # backward compat retained
 
 
 # ===========================================================================
@@ -239,6 +319,113 @@ def test_parse_hsm_scene_zup_conversion():
 def test_construct_hssd_mesh_path():
     p = rnd.construct_hssd_mesh_path("/data/hssd", "4f557c5ba812")
     assert p == "/data/hssd/objects/4/4f557c5ba812.glb"
+
+
+# ===========================================================================
+# (b'') Layout scramble — both state formats
+# ===========================================================================
+
+def test_scramble_stk_deterministic_and_preserved():
+    state = make_stk_state_with_floor(8, half=5.0)
+    a = var.scramble_layout(state, seed=7)
+    b = var.scramble_layout(state, seed=7)
+    c = var.scramble_layout(state, seed=8)
+    da = [o["transform"]["data"] for o in a["scene"]["object"]]
+    db = [o["transform"]["data"] for o in b["scene"]["object"]]
+    dc = [o["transform"]["data"] for o in c["scene"]["object"]]
+    assert da == db                 # deterministic for fixed seed
+    assert da != dc                 # different seed -> different layout
+    # count + ids preserved
+    assert len(a["scene"]["object"]) == 8
+    assert [o["id"] for o in a["scene"]["object"]] == [str(i) for i in range(8)]
+
+
+def test_scramble_stk_in_bounds_and_rotation_unchanged():
+    state = make_stk_state_with_floor(8, half=5.0)
+    out = var.scramble_layout(state, seed=3)
+    for orig, new in zip(state["scene"]["object"], out["scene"]["object"]):
+        (ox, oy, oz), orot = rnd.decode_stk_transform(orig["transform"]["data"])
+        (nx, ny, nz), nrot = rnd.decode_stk_transform(new["transform"]["data"])
+        assert -5.0 - 1e-6 <= nx <= 5.0 + 1e-6
+        assert -5.0 - 1e-6 <= nz <= 5.0 + 1e-6
+        assert math.isclose(ny, oy, abs_tol=1e-6)        # height preserved
+        assert math.isclose(nrot, orot, abs_tol=1e-6)    # orientation preserved
+
+
+def test_scramble_stk_bounds_fallback_no_arch():
+    # No arch -> bounds derive from object position extents; still in-bounds.
+    state = make_stk_state(8)  # positions x in [0,7], z in [-7,0]
+    out = var.scramble_layout(state, seed=1)
+    for new in out["scene"]["object"]:
+        (nx, _, nz), _ = rnd.decode_stk_transform(new["transform"]["data"])
+        assert 0.0 - 1e-6 <= nx <= 7.0 + 1e-6
+        assert -7.0 - 1e-6 <= nz <= 0.0 + 1e-6
+
+
+@pytest.mark.parametrize("as_dict", [True, False])
+def test_scramble_hsm_deterministic_bounds_preserved(as_dict):
+    state = make_hsm_state(8, as_dict=as_dict)  # x in [0,7], z in [-7,0]
+    a = var.scramble_layout(state, seed=5)
+    b = var.scramble_layout(state, seed=5)
+    objs_a, _ = var._scene_objects_as_list(a["scene_objects"])
+    objs_b, _ = var._scene_objects_as_list(b["scene_objects"])
+    pa = [o["position"] for o in objs_a]
+    pb = [o["position"] for o in objs_b]
+    assert pa == pb                  # deterministic
+    assert len(objs_a) == 8
+    assert sorted(o["id"] for o in objs_a) == [str(i) for i in range(8)]
+    for o in objs_a:
+        x, y, z = o["position"]
+        assert 0.0 - 1e-6 <= x <= 7.0 + 1e-6
+        assert -7.0 - 1e-6 <= z <= 0.0 + 1e-6
+
+
+def test_scramble_hsm_height_and_rotation_unchanged():
+    state = make_hsm_state(8)
+    orig_objs, _ = var._scene_objects_as_list(state["scene_objects"])
+    orig = {o["id"]: (o["position"][1], o["rotation"]) for o in orig_objs}
+    out = var.scramble_layout(state, seed=2)
+    objs, _ = var._scene_objects_as_list(out["scene_objects"])
+    for o in objs:
+        oy, orot = orig[o["id"]]
+        assert math.isclose(o["position"][1], oy, abs_tol=1e-9)
+        assert o["rotation"] == orot
+
+
+# ===========================================================================
+# (b''') Substitution within / cross intent recording + degradation
+# ===========================================================================
+
+@pytest.mark.parametrize("variant,mode", list(var.SUBST_MODES.items()))
+@pytest.mark.parametrize("as_dict", [True, False])
+def test_substitution_hsm_intent_and_degradation(variant, mode, as_dict):
+    state = make_hsm_state(4, as_dict=as_dict)
+    new_state, report = var.apply_substitution(state, mode, seed=42)
+    assert report["mode"] == mode
+    assert report["intended"] == 4
+    assert report["applied"] == 0           # retrieval unavailable in audit env
+    assert report["available"] is False
+    assert report["intent"] == {str(i): mode for i in range(4)}
+    objs, _ = var._scene_objects_as_list(new_state["scene_objects"])
+    assert len(objs) == 4
+    assert all(o["_vlmunr_substitution"]["mode"] == mode for o in objs)
+    assert new_state["_vlmunr_substitution"]["mode"] == mode
+
+
+@pytest.mark.parametrize("variant,mode", list(var.SUBST_MODES.items()))
+def test_substitution_stk_intent_and_degradation(variant, mode):
+    state = make_stk_state(3)
+    new_state, report = var.apply_substitution(state, mode, seed=42)
+    assert report["intended"] == 3
+    assert report["applied"] == 0
+    assert report["available"] is False
+    assert report["intent"] == {str(i): mode for i in range(3)}
+    assert all("_vlmunr_substitution" in o for o in new_state["scene"]["object"])
+
+
+def test_substitution_bad_mode():
+    with pytest.raises(ValueError):
+        var.apply_substitution(make_hsm_state(2), "sideways", seed=1)
 
 
 # ===========================================================================

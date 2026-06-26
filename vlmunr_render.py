@@ -108,6 +108,30 @@ def decode_stk_transform(
     return (x, y, z), rot_deg
 
 
+def encode_stk_transform(
+    position: Tuple[float, float, float], rotation_deg: float
+) -> List[float]:
+    """
+    Inverse of `decode_stk_transform`: encode an HSM Y-up position (x, y, z) and a
+    CCW-about-Y rotation (degrees) into the on-disk flat 16-element COLUMN-MAJOR
+    (reshape order='F') stk transform `data`.
+
+    Builds T with translation column [-x, y, z] and the CCW-about-Y rotation block,
+    then applies the STK fix (M = FIX @ T) and flattens column-major. Reusing the
+    same STK_FIX_MATRIX guarantees decode(encode(p, r)) == (p, r).
+    """
+    x, y, z = position
+    r = math.radians(rotation_deg)
+    cos_r, sin_r = math.cos(r), math.sin(r)
+    T = np.eye(4)
+    T[:3, :3] = np.array(
+        [[cos_r, 0.0, -sin_r], [0.0, 1.0, 0.0], [sin_r, 0.0, cos_r]]
+    )
+    T[:3, 3] = [-float(x), float(y), float(z)]
+    M = STK_FIX_MATRIX @ T
+    return M.reshape(-1, order="F").tolist()
+
+
 def stk_modelid_to_hssd_id(model_id: str) -> str:
     """Extract the HSSD id from a modelId like 'fpModel.<hssd_id>'."""
     return model_id.split(".")[-1]
@@ -364,13 +388,13 @@ def main() -> None:
     parser.add_argument("--scene-dir", required=True, type=Path,
                         help="Directory containing hsm_scene_state.json and/or stk_scene_state.json")
     parser.add_argument("--phase", default="all",
-                        choices=["1a", "1b", "1c", "1d", "2", "all"],
+                        choices=cfg.ALL_PHASES + ["all"],
                         help="Audit phase to sweep")
     parser.add_argument("--hssd-dir", default=os.environ.get("HSSD_DIR"),
                         help="HSSD models root (for stk fallback mesh resolution)")
     args = parser.parse_args()
 
-    phases = ["1a", "1b", "1c", "1d", "2"] if args.phase == "all" else [args.phase]
+    phases = list(cfg.ALL_PHASES) if args.phase == "all" else [args.phase]
     for ph in phases:
         outs = render_phase(args.scene_dir, ph, args.hssd_dir)
         print(f"[vlmunr_render] phase {ph}: wrote {len(outs)} file(s)")
