@@ -11,14 +11,25 @@ from PIL import Image
 from .base_session import BaseVLMSession
 from .utils import extract_json, extract_code, extract_program
 
-MODEL: str = "gpt-4o-2024-08-06"
+import os
+
+MODEL: str = "gpt-5.1-2025-11-13"
+# MODEL: str = "gpt-4o-2024-08-06"
 # MODEL = "o4-mini"
 # MODEL = "gpt-4.1-2025-04-14"
 # MODEL: str = "gpt-5"
-CUSTOM_URL: str = "" # set to custom URL if needed
+# Optional OpenAI-compatible endpoint override for the audit. Leave unset to use
+# the default OpenAI endpoint. When pointing at chatanywhere, also export
+# OPENAI_API_KEY=$CHATANYWHERE_API_KEY so the client authenticates correctly.
+CUSTOM_URL: str = os.environ.get("VLMUNR_OPENAI_BASE_URL", "")
 
-DEFAULT_MODEL: str = "gpt-4o-2024-08-06"
-REASONING_MODELS: list[str] = ["o3-mini", "o4-mini", "gpt-5"]
+DEFAULT_MODEL: str = "gpt-5.1-2025-11-13"
+REASONING_MODELS: list[str] = [
+    "o3-mini",
+    "o4-mini",
+    "gpt-5",
+    "gpt-5.1-2025-11-13",
+]
 RETRY_COUNT: int = 10
 MAX_IMAGE_SIZE: int = 2048
 
