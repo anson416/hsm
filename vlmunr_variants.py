@@ -41,7 +41,7 @@ import vlmunr_render as rnd
 # ---------------------------------------------------------------------------
 
 REMOVAL_DIVISORS = {"variant_half": 2, "variant_quarter": 4, "variant_eighth": 8}
-WORST_MATCH_RANKS = {"variant_alt_0": 0, "variant_alt_2": 2, "variant_alt_4": 4}
+WORST_MATCH_RANKS = {}  # VLMUNR: alt_* dropped per methodology (keep within/cross only)
 # Substitution modes: same category (different instance) vs different category.
 SUBST_MODES = {"variant_subst_within": "within", "variant_subst_cross": "cross"}
 
@@ -160,8 +160,13 @@ def _floor_bounds_stk(state: dict) -> Optional[Tuple[float, float, float, float]
     pts = floor_pts or wall_pts
     for p in pts:
         if len(p) >= 3:
-            xs.append(-float(p[0]))
-            zs.append(float(p[2]))
+            # stk arch floor points are stored as [px, py, 0] in the floor plane:
+            # px maps to HSM x and py maps to HSM z (depth). This matches decoded
+            # object positions (x in [0,W], z in [0,D]). Do NOT negate x and do
+            # NOT read p[2] (always 0) — that put scrambled objects outside the
+            # room and collapsed the z range to a single line.
+            xs.append(float(p[0]))
+            zs.append(float(p[1]))
     if not xs or not zs:
         return None
     return (min(xs), max(xs), min(zs), max(zs))

@@ -309,9 +309,48 @@ def is_mesh(obj: Object, raise_err: bool = False) -> bool:
 def import_obj(
     obj_path: str, load_vertex_colors: bool = False, use_shadow: bool = True
 ) -> Object:
+    before = set(bpy.data.objects)
+    ext = os.path.splitext(obj_path)[1].lower()
     with redirect_stdout():
-        bpy.ops.wm.obj_import(filepath=obj_path)
-    obj = bpy.context.selected_objects[0]
+        if ext in (".glb", ".gltf"):
+            bpy.ops.import_scene.gltf(filepath=obj_path)
+        else:
+            bpy.ops.wm.obj_import(filepath=obj_path)
+    added = [o for o in bpy.data.objects if o not in before]
+    sel = list(bpy.context.selected_objects) or added
+    if not sel:
+        raise RuntimeError(f"import produced no objects: {obj_path}")
+
+    if ext in (".glb", ".gltf"):
+        # A GLB often imports as several mesh parts (+ empties). Join all mesh
+        # parts into a single object so a single transform moves the whole asset.
+        added_names = [o.name for o in added]
+        meshes = [o for o in added if getattr(o, "type", None) == "MESH"]
+        if not meshes:
+            obj = sel[0]
+        else:
+            obj = meshes[0]
+            obj_name = obj.name
+            if len(meshes) > 1:
+                bpy.ops.object.select_all(action="DESELECT")
+                for m in meshes:
+                    m.select_set(True)
+                bpy.context.view_layer.objects.active = obj
+                with redirect_stdout():
+                    bpy.ops.object.join()
+            obj = bpy.data.objects[obj_name]
+            # drop leftover empties/other non-mesh objects added by this import
+            for nm in added_names:
+                o = bpy.data.objects.get(nm)
+                if o is not None and o.name != obj.name and getattr(o, "type", None) != "MESH":
+                    try:
+                        bpy.data.objects.remove(o, do_unlink=True)
+                    except Exception:
+                        pass
+        obj.visible_shadow = use_shadow
+        return obj
+
+    obj = sel[0]
 
     if load_vertex_colors and is_mesh(obj):
         colors = []
