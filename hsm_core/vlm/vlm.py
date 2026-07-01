@@ -15,7 +15,7 @@ def register_vlm_backend(name: str, factory_func: Callable):
 def create_session(
     prompts_path: str, 
     model_type: str = "gpt", 
-    model_name: str = "gpt-4o-2024-08-06",
+    model_name: str = "gpt-5.1-2025-11-13",
     temperature: float = 0.7, 
     output_dir: str = "", 
     prompt_info: Dict[str, str] = {},

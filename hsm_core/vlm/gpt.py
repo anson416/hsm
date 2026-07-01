@@ -11,14 +11,25 @@ from PIL import Image
 from .base_session import BaseVLMSession
 from .utils import extract_json, extract_code, extract_program
 
-MODEL: str = "gpt-4o-2024-08-06"
+import os
+
+MODEL: str = "gpt-5.1-2025-11-13"
+# MODEL: str = "gpt-4o-2024-08-06"
 # MODEL = "o4-mini"
 # MODEL = "gpt-4.1-2025-04-14"
 # MODEL: str = "gpt-5"
-CUSTOM_URL: str = "" # set to custom URL if needed
+# Optional OpenAI-compatible endpoint override for the audit. Leave unset to use
+# the default OpenAI endpoint. When pointing at chatanywhere, also export
+# OPENAI_API_KEY=$CHATANYWHERE_API_KEY so the client authenticates correctly.
+CUSTOM_URL: str = os.environ.get("VLMUNR_OPENAI_BASE_URL", "https://api.chatanywhere.tech/v1")
 
-DEFAULT_MODEL: str = "gpt-4o-2024-08-06"
-REASONING_MODELS: list[str] = ["o3-mini", "o4-mini", "gpt-5"]
+DEFAULT_MODEL: str = "gpt-5.1-2025-11-13"
+REASONING_MODELS: list[str] = [
+    "o3-mini",
+    "o4-mini",
+    "gpt-5",
+    "gpt-5.1-2025-11-13",
+]
 RETRY_COUNT: int = 10
 MAX_IMAGE_SIZE: int = 2048
 
@@ -34,7 +45,8 @@ class Session(BaseVLMSession):
         Initialize a GPT Session.
         """
         load_dotenv()
-        self.client = OpenAI(base_url=CUSTOM_URL if CUSTOM_URL else None)
+        _api_key = os.environ.get("OPENAI_API_KEY") or os.environ.get("CHATANYWHERE_API_KEY")
+        self.client = OpenAI(base_url=CUSTOM_URL if CUSTOM_URL else None, api_key=_api_key)
         self.model = model or DEFAULT_MODEL
         super().__init__(prompts_path, self.model, temperature, output_dir, prompt_info)
     
