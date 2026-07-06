@@ -349,7 +349,12 @@ def build_blender_scene(records: List[dict]) -> Tuple[object, object]:
         if not mp or not os.path.exists(mp):
             missing.append(mp)
             continue
-        obj = bpa.import_obj(mp)
+        try:
+            obj = bpa.import_obj(mp)
+        except Exception as _e:
+            print(f"[vlmunr_render] WARNING: import failed for {mp}: {_e}; skipped.")
+            missing.append(mp)
+            continue
         bpa.transform(
             obj,
             position=rec["position"],
