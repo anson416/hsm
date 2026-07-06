@@ -284,6 +284,57 @@ def _hdri_path(hdri: str) -> Optional[Tuple[str, float]]:
     return None
 
 
+_VLMUNR_WALLS = []
+_VLMUNR_STATE = None
+
+
+def _load_state_for_shell(scene_dir):
+    """Load the stk/hsm scene-state JSON so the shell builder can read arch."""
+    import json as _json, os as _os
+    for name in ("stk_scene_state.json", "hsm_scene_state.json"):
+        pth = _os.path.join(str(scene_dir), name)
+        if _os.path.isfile(pth):
+            try:
+                return _json.load(open(pth))
+            except Exception:
+                return None
+    return None
+
+
+def _build_hsm_shell():
+    """Build floor+walls from scene.arch. HSM arch point (a,b,c) -> Blender
+    (a,-b,c); walls extrude +z to their height. Returns wall objects (tagged)."""
+    try:
+        import bpy  # noqa
+        import vlmunr_shell as _vs
+    except Exception:
+        return []
+    state = globals().get("_VLMUNR_STATE")
+    if not state:
+        return []
+    arch = (state.get("scene", {}) or {}).get("arch", {}) or {}
+    els = arch.get("elements", []) or []
+    floor = next((e for e in els if e.get("type") == "Floor"), None)
+    walls_src = [e for e in els if e.get("type") == "Wall"]
+    if floor is None:
+        return []
+    # floor polygon: arch (a,b,c=0) -> Blender (a, -b)
+    verts = [(float(p[0]), -float(p[1])) for p in floor.get("points", [])]
+    if len(verts) < 3:
+        return []
+    wh = 2.5
+    if walls_src:
+        hs = [float(w.get("height", 2.5)) for w in walls_src if w.get("height")]
+        if hs:
+            wh = max(hs)
+    try:
+        return _vs.build_room_shell(bpy, verts, wh, margin=0.0, ceiling=False)
+    except Exception as _e:
+        print("VLMUNR hsm shell build failed:", _e)
+        return []
+
+
+
 def build_blender_scene(records: List[dict]) -> Tuple[object, object]:
     """
     Import all meshes into a fresh Blender scene and place them. Returns
@@ -298,7 +349,12 @@ def build_blender_scene(records: List[dict]) -> Tuple[object, object]:
         if not mp or not os.path.exists(mp):
             missing.append(mp)
             continue
-        obj = bpa.import_obj(mp)
+        try:
+            obj = bpa.import_obj(mp)
+        except Exception as _e:
+            print(f"[vlmunr_render] WARNING: import failed for {mp}: {_e}; skipped.")
+            missing.append(mp)
+            continue
         bpa.transform(
             obj,
             position=rec["position"],
@@ -307,6 +363,8 @@ def build_blender_scene(records: List[dict]) -> Tuple[object, object]:
         placed += 1
     if missing:
         print(f"[vlmunr_render] WARNING: {len(missing)} mesh(es) missing/unresolved; skipped.")
+    # VLMUNR_PATCH room shell
+    globals()["_VLMUNR_WALLS"] = _build_hsm_shell()
     renderer = bpa.Renderer()
     center, radius = renderer.compute_bounding_sphere()
     return renderer, (center, radius)
@@ -324,6 +382,7 @@ def render_phase(
     import vlmunr_bpa as bpa
 
     records = load_scene_records(scene_dir, hssd_dir)
+    globals()["_VLMUNR_STATE"] = _load_state_for_shell(scene_dir)
     out_dir = scene_dir / "renderings"
     out_dir.mkdir(exist_ok=True)
 
@@ -356,7 +415,11 @@ def render_phase(
         hdri = conf["hdri"]
 
         ensure_world(hdri)
-
+        try:
+            import vlmunr_shell as _vs
+            _vs.cull_walls(globals().get("_VLMUNR_WALLS", []), pitch, yaw)
+        except Exception:
+            pass
         master = out_dir / master_filename(res, focal, pitch, yaw, hdri)
         renderer.render_perspective(
             str(master),
@@ -365,6 +428,7 @@ def render_phase(
             rotation=(pitch, 0, yaw),
             resolution=res,
             focal_length=focal,
+            fit_ratio=0.6,  # VLMUNR: tighten framing toward per-vertex fit
             background=None,  # transparent master
         )
         outputs.append(str(master))

@@ -306,9 +306,44 @@ def is_mesh(obj: Object, raise_err: bool = False) -> bool:
     return False
 
 
+def _import_glb_joined(glb_path: str, use_shadow: bool = True):
+    """Import a .glb via the glTF importer and join child meshes into one Object.
+    HSSD assets are glTF; the OBJ importer silently loads nothing on them."""
+    before = set(bpy.context.scene.objects)
+    with redirect_stdout():
+        bpy.ops.import_scene.gltf(filepath=glb_path)
+    new_objs = [o for o in bpy.context.scene.objects if o not in before]
+    meshes = [o for o in new_objs if o.type == "MESH"]
+    if not meshes:
+        for o in list(new_objs):
+            try:
+                bpy.data.objects.remove(o, do_unlink=True)
+            except Exception:
+                pass
+        raise RuntimeError("glTF import produced no mesh: " + glb_path)
+    bpy.ops.object.select_all(action="DESELECT")
+    for m in meshes:
+        m.select_set(True)
+    bpy.context.view_layer.objects.active = meshes[0]
+    if len(meshes) > 1:
+        bpy.ops.object.join()
+    obj = bpy.context.view_layer.objects.active
+    # drop leftover empties from the import
+    for o in [x for x in bpy.context.scene.objects if x not in before and x is not obj]:
+        if o.type == "EMPTY":
+            try:
+                bpy.data.objects.remove(o, do_unlink=True)
+            except Exception:
+                pass
+    obj.visible_shadow = use_shadow
+    return obj
+
+
 def import_obj(
     obj_path: str, load_vertex_colors: bool = False, use_shadow: bool = True
 ) -> Object:
+    if obj_path.lower().endswith((".glb", ".gltf")):
+        return _import_glb_joined(obj_path, use_shadow=use_shadow)
     with redirect_stdout():
         bpy.ops.wm.obj_import(filepath=obj_path)
     obj = bpy.context.selected_objects[0]

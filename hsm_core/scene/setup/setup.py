@@ -121,19 +121,26 @@ def resolve_room_geometry(
             "window_locations": windows,
             "room_height": height,
         }
-        resp = room_session.send_with_validation(
-            "room_boundary",
-            payload,
-            validate_floorplan,
-            verbose=True,
-            is_json=True,
-        )
-        data = json.loads(extract_json(resp))
-        # Preserve config values, only use VLM for missing fields
-        vertices = vertices or _as_xy_list(data.get("room_vertices"))
-        height = height if height is not None else (float(data["room_height"]) if "room_height" in data else None)
-        door = door or _as_xy(data.get("door_location"))
-        windows = windows or _as_xy_list(data.get("window_locations"))
+        try:
+            resp = room_session.send_with_validation(
+                "room_boundary",
+                payload,
+                validate_floorplan,
+                verbose=True,
+                is_json=True,
+            )
+            data = json.loads(extract_json(resp))
+            # Preserve config values, only use VLM for missing fields
+            vertices = vertices or _as_xy_list(data.get("room_vertices"))
+            height = height if height is not None else (float(data["room_height"]) if "room_height" in data else None)
+            door = door or _as_xy(data.get("door_location"))
+            windows = windows or _as_xy_list(data.get("window_locations"))
+        except RuntimeError:
+            logger.warning("room_boundary validation failed after all retries; using default 4x4 room geometry")
+            vertices = vertices or [[0.0, 0.0], [4.0, 0.0], [4.0, 4.0], [0.0, 4.0]]
+            height = height if height is not None else 2.5
+            door = door or [2.0, 0.0]
+            windows = windows or [[2.0, 4.0]]
 
     return RoomGeometry(
         vertices=vertices or [],

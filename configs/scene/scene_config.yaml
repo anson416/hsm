@@ -32,7 +32,7 @@ execution:
 # target_occupancy_percent: Target surface saturation percentage to stop iterations
 parameters:
   large_object_generation:
-    max_iterations: 2
+    max_iterations: 1
     target_occupancy_percent: 75.0
   wall_object_generation:
     max_iterations: 1
