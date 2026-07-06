@@ -21,7 +21,7 @@ MODEL: str = "gpt-5.1-2025-11-13"
 # Optional OpenAI-compatible endpoint override for the audit. Leave unset to use
 # the default OpenAI endpoint. When pointing at chatanywhere, also export
 # OPENAI_API_KEY=$CHATANYWHERE_API_KEY so the client authenticates correctly.
-CUSTOM_URL: str = os.environ.get("VLMUNR_OPENAI_BASE_URL", "")
+CUSTOM_URL: str = os.environ.get("VLMUNR_OPENAI_BASE_URL", "https://api.chatanywhere.tech/v1")
 
 DEFAULT_MODEL: str = "gpt-5.1-2025-11-13"
 REASONING_MODELS: list[str] = [
@@ -45,7 +45,8 @@ class Session(BaseVLMSession):
         Initialize a GPT Session.
         """
         load_dotenv()
-        self.client = OpenAI(base_url=CUSTOM_URL if CUSTOM_URL else None)
+        _api_key = os.environ.get("OPENAI_API_KEY") or os.environ.get("CHATANYWHERE_API_KEY")
+        self.client = OpenAI(base_url=CUSTOM_URL if CUSTOM_URL else None, api_key=_api_key)
         self.model = model or DEFAULT_MODEL
         super().__init__(prompts_path, self.model, temperature, output_dir, prompt_info)
     
