@@ -43,9 +43,16 @@ async def retrieve(
     max_height: float = -1.0,
     object_type: ObjectType = ObjectType.UNDEFINED,
     support_surface_constraints: Optional[Dict[str, Dict]] = None,
-    server_retrieval_client: Optional[ServerRetrievalClient] = None
+    server_retrieval_client: Optional[ServerRetrievalClient] = None,
+    worst_match: bool = False
 ) -> None:
-    """Batch retrieve meshes for all objects at once."""
+    """Batch retrieve meshes for all objects at once.
+
+    When ``worst_match`` is True the CLIP similarity ranking is inverted so the
+    LOWEST-similarity (worst) meshes are selected instead of the best — used by the
+    "worst-object" content variant. No LLM call is involved; only the asset
+    retrieval/ranking is flipped.
+    """
     logger.info(f"Batch retrieving meshes for {len(objs)} objects with {object_type} type")
 
     try:
@@ -70,7 +77,7 @@ async def retrieve(
             objs_to_process, filtered_mesh_ids, obj_descriptions_list, server_retrieval_client,
             model_instance, tokenizer, hssd_dir_path,
             use_top_k, avoid_used, randomize, force_k, max_height, object_type,
-            support_surface_constraints
+            support_surface_constraints, worst_match=worst_match
         )
 
         # --- 4. FALLBACK RETRIEVAL ---
@@ -81,7 +88,7 @@ async def retrieve(
                 unassigned_objs, wnsynsetkeys, objs_to_process, used_indices, mesh_dict,
                 server_retrieval_client, model_instance, tokenizer, hssd_dir_path,
                 use_top_k, avoid_used, max_height, object_type,
-                support_surface_constraints, same_per_label
+                support_surface_constraints, same_per_label, worst_match=worst_match
             )
 
         # --- 5. APPLY & LOG ---

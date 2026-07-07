@@ -36,7 +36,8 @@ async def retrieve_adaptive(
     hssd_dir_path: Optional[Path] = None,
     max_height: float = -1.0,
     object_type: ObjectType = ObjectType.UNDEFINED,
-    support_surface_constraints: Optional[Dict[str, Dict]] = None
+    support_surface_constraints: Optional[Dict[str, Dict]] = None,
+    worst_match: bool = False
 ) -> None:
     """
     Adaptive retrieval function that automatically chooses between server and local retrieval.
@@ -57,6 +58,8 @@ async def retrieve_adaptive(
         max_height: Maximum height constraint
         object_type: Type of objects being processed
         support_surface_constraints: Support surface constraints
+        worst_match: If True, invert CLIP ranking to select worst (lowest-similarity)
+            meshes instead of best. No LLM call; only asset retrieval is flipped.
     """
     from .main import retrieve
 
@@ -84,7 +87,8 @@ async def retrieve_adaptive(
             max_height=max_height,
             object_type=object_type,
             support_surface_constraints=support_surface_constraints,
-            server_retrieval_client=server_retrieval_client
+            server_retrieval_client=server_retrieval_client,
+            worst_match=worst_match
         )
     except RetrievalServerError as e:
         # Log server error and re-raise to stop scene generation

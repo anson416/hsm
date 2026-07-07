@@ -101,7 +101,8 @@ async def run_primary_retrieval(
     force_k: int,
     max_height: float,
     object_type: ObjectType,
-    support_surface_constraints: Optional[Dict[str, Dict]] = None
+    support_surface_constraints: Optional[Dict[str, Dict]] = None,
+    worst_match: bool = False
 ) -> Tuple[Dict[str, Dict], Set[str]]:
     """
     Runs the main retrieval loop using CLIP and dimension matching.
@@ -121,6 +122,11 @@ async def run_primary_retrieval(
         max_height: Maximum height constraint
         object_type: Type of object
         support_surface_constraints: Support surface constraints
+        worst_match: If True, invert the similarity ranking so the LOWEST-CLIP
+            (worst) meshes are considered first instead of the highest. Used by the
+            "worst-object" content variant to select the worst-matching asset per
+            object without re-calling the LLM. The downstream bbox-quality re-sort is
+            still applied to the (worst-CLIP) top-K set.
 
     Returns:
         Tuple of (mesh_dict, used_indices)
@@ -157,11 +163,14 @@ async def run_primary_retrieval(
             final_filtered_mesh_ids_for_similarities.append(scored_mesh_ids_for_obj)
             similarities_list_per_obj.append(filtered_similarities[0])
 
-    # Get top K indices based on similarity scores
+    # Get top K indices based on similarity scores. Best-match (default) sorts by
+    # DESCENDING similarity via (-sim).argsort(); worst_match sorts by ASCENDING
+    # similarity via sim.argsort() so the lowest-CLIP (worst) meshes come first.
     best_similarity_indices_per_obj = []
     for sim_tensor in similarities_list_per_obj:
         if sim_tensor.numel() > 0:
-            best_similarity_indices_per_obj.append((-sim_tensor).argsort())
+            sorted_tensor = sim_tensor.argsort() if worst_match else (-sim_tensor).argsort()
+            best_similarity_indices_per_obj.append(sorted_tensor)
         else:
             best_similarity_indices_per_obj.append(torch.tensor([], dtype=torch.long))
 
@@ -262,7 +271,8 @@ async def handle_fallback_retrieval(
     max_height: float,
     object_type: ObjectType,
     support_surface_constraints: Optional[Dict[str, Dict]] = None,
-    same_per_label: bool = True
+    same_per_label: bool = True,
+    worst_match: bool = False
 ) -> None:
     """
     Attempts to find meshes for objects that failed primary retrieval.
@@ -283,6 +293,8 @@ async def handle_fallback_retrieval(
         object_type: Type of object
         support_surface_constraints: Support surface constraints
         same_per_label: Whether to use same mesh per label
+        worst_match: If True, invert CLIP ordering in the fallback sort so the
+            lowest-CLIP (worst) candidate wins (mirrors run_primary_retrieval).
     """
     if hssd_dir_path is None:
         hssd_dir_path = HSSD_PATH
@@ -344,12 +356,14 @@ async def handle_fallback_retrieval(
                 break
 
         if best_fallback_candidates:
-            # Sort by search type priority, then by penalized status, bbox score, and clip score
+            # Sort by search type priority, then by penalized status, bbox score, and clip score.
+            # worst_match inverts the CLIP term so the lowest-CLIP candidate sorts first
+            # (ascending CLIP) instead of the highest (descending via -clip).
             best_fallback_candidates.sort(key=lambda x: (
                 0 if x[8] == "specific_wnkey" else 1,  # search_type priority
                 x[5],  # penalized flag
                 x[0],  # bbox score
-                -x[7]  # negative clip score for descending order
+                x[7] if worst_match else -x[7],  # clip: ascending (worst) / descending (best)
             ))
 
             logger.debug(f"Fallback: Top candidates for '{obj_fb_iter.label}' (Sorted by Search Type, Penalized, BBox, -CLIP Score):")
