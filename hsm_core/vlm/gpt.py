@@ -21,6 +21,10 @@ MODEL: str = "gpt-5.1-2025-11-13"
 # Optional OpenAI-compatible endpoint override for the audit. Leave unset to use
 # the default OpenAI endpoint. When pointing at chatanywhere, also export
 # OPENAI_API_KEY=$CHATANYWHERE_API_KEY so the client authenticates correctly.
+# All four of base_url / api_key / model / temperature may be overridden via the
+# VLMUNR_OPENAI_* env vars (set by vlmunr_cli.py from its --base-url/--api-key/
+# --model/--temperature flags) so the whole pipeline picks them up without
+# threading parameters through every create_session() call site.
 CUSTOM_URL: str = os.environ.get("VLMUNR_OPENAI_BASE_URL", "https://api.chatanywhere.tech/v1")
 
 DEFAULT_MODEL: str = "gpt-5.1-2025-11-13"
@@ -33,21 +37,49 @@ REASONING_MODELS: list[str] = [
 RETRY_COUNT: int = 10
 MAX_IMAGE_SIZE: int = 2048
 
+
+def _env_float(name: str, default: float) -> float:
+    """Parse a float from an env var, returning `default` on absence/parse error."""
+    raw = os.environ.get(name)
+    if raw is None or raw == "":
+        return default
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return default
+
+
 class Session(BaseVLMSession):
     """GPT-based VLM session using OpenAI API."""
 
-    def __init__(self, prompts_path, 
-                 model=MODEL, 
-                 temperature: float = 0.7, 
-                 output_dir: str = "", 
+    def __init__(self, prompts_path,
+                 model=None,
+                 temperature: float | None = None,
+                 output_dir: str = "",
                  prompt_info: dict[str, str] | None = None) -> None:
         """
         Initialize a GPT Session.
+
+        Endpoint / API key / model / temperature resolution order:
+          explicit arg -> VLMUNR_OPENAI_* env var -> module default.
+        This lets vlmunr_cli.py set the env vars once and have every Session
+        created across the pipeline pick them up.
         """
         load_dotenv()
-        _api_key = os.environ.get("OPENAI_API_KEY") or os.environ.get("CHATANYWHERE_API_KEY")
-        self.client = OpenAI(base_url=CUSTOM_URL if CUSTOM_URL else None, api_key=_api_key)
-        self.model = model or DEFAULT_MODEL
+        # Resolve base_url + api_key from env (explicit None -> OpenAI default).
+        _base_url = os.environ.get("VLMUNR_OPENAI_BASE_URL")
+        _api_key = (
+            os.environ.get("VLMUNR_OPENAI_API_KEY")
+            or os.environ.get("OPENAI_API_KEY")
+            or os.environ.get("CHATANYWHERE_API_KEY")
+        )
+        self.client = OpenAI(base_url=_base_url if _base_url else None, api_key=_api_key)
+        # model: explicit arg wins, else env, else module default.
+        resolved_model = model or os.environ.get("VLMUNR_OPENAI_MODEL") or DEFAULT_MODEL
+        # temperature: explicit arg wins, else env, else 0.7.
+        if temperature is None:
+            temperature = _env_float("VLMUNR_OPENAI_TEMPERATURE", 0.7)
+        self.model = resolved_model
         super().__init__(prompts_path, self.model, temperature, output_dir, prompt_info)
     
     def send(self, task: str, prompt_info: dict[str, str] | None = None,
