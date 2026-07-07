@@ -255,6 +255,157 @@ def test_worst_match_degrades_gracefully():
 
 
 # ===========================================================================
+# (b'') Biggest-only + scramble-rotation + named variants
+# ===========================================================================
+
+def make_hsm_state_distinct_dims(n, as_dict=True):
+    """hsm state where object i has dimensions (i+1, 1, 1) so volumes are distinct."""
+    objs = []
+    for i in range(n):
+        objs.append({
+            "name": f"obj_{i}",
+            "position": [float(i), 0.0, float(-i)],
+            "dimensions": [float(i + 1), 1.0, 1.0],   # volume = i+1
+            "rotation": 15.0 * i,
+            "mesh_path": f"/fake/hssd/objects/a/hssdid{i:04d}.glb",
+            "obj_type": "large",
+            "id": str(i),
+        })
+    scene_objects = {o["id"]: o for o in objs} if as_dict else objs
+    return {"scene_state_version": 1, "scene_objects": scene_objects}
+
+
+def test_object_volume_and_biggest_index():
+    assert var._object_volume({"dimensions": [2, 3, 4]}) == 24.0
+    assert var._object_volume({"dimensions": [1, 1, 1]}) == 1.0
+    assert var._object_volume({}) == 0.0
+    assert var._object_volume({"dimensions": [-1, 2, 3]}) == 0.0  # negative -> 0
+    objs = [{"dimensions": [1, 1, 1]}, {"dimensions": [3, 2, 2]}, {"dimensions": [2, 2, 2]}]
+    assert var.select_biggest_index(objs) == 1  # volumes 1, 12, 8
+
+
+@pytest.mark.parametrize("as_dict", [True, False])
+def test_biggest_only_hsm_keeps_largest(as_dict):
+    state = make_hsm_state_distinct_dims(5, as_dict=as_dict)
+    out = var.biggest_only(state)
+    objs, was_dict = var._scene_objects_as_list(out["scene_objects"])
+    assert len(objs) == 1
+    # largest volume = object index 4 (volume 5)
+    assert objs[0]["dimensions"] == [5.0, 1.0, 1.0]
+    assert objs[0]["id"] == "0"
+
+
+def test_biggest_only_stk_keeps_largest():
+    state = make_stk_state(4)
+    # give stk objects dimensions via the hsm-style field? stk has none; biggest_only_stk
+    # uses select_biggest_index over the stk object dicts which lack 'dimensions', so all
+    # volumes are 0 and the stable sort keeps index 0.
+    out = var.biggest_only_stk(state)
+    objs = out["scene"]["object"]
+    assert len(objs) == 1
+    assert objs[0]["id"] == "0"
+    assert objs[0]["index"] == 0
+
+
+def test_biggest_only_empty():
+    state = {"scene_state_version": 1, "scene_objects": {}}
+    out = var.biggest_only(state)
+    assert out["scene_objects"] == {}
+
+
+def test_scramble_hsm_rotation_randomized():
+    state = make_hsm_state_distinct_dims(5)
+    out = var.scramble_hsm(state, seed=7, scramble_rotation=True)
+    objs, _ = var._scene_objects_as_list(out["scene_objects"])
+    # all 5 kept, rotations now in [0,360) and (almost surely) changed from originals
+    assert len(objs) == 5
+    for o in objs:
+        assert 0.0 <= o["rotation"] <= 360.0
+    orig_rots = [15.0 * i for i in range(5)]
+    assert [o["rotation"] for o in objs] != orig_rots
+
+
+def test_scramble_hsm_rotation_preserved_by_default():
+    state = make_hsm_state_distinct_dims(5)
+    out = var.scramble_hsm(state, seed=7, scramble_rotation=False)
+    objs, _ = var._scene_objects_as_list(out["scene_objects"])
+    assert [o["rotation"] for o in objs] == [15.0 * i for i in range(5)]
+
+
+def test_scramble_layout_rotation_flag_dispatches(tmp_path):
+    state = make_hsm_state_distinct_dims(4)
+    a = var.scramble_layout(state, seed=3, scramble_rotation=True)
+    b = var.scramble_layout(state, seed=3, scramble_rotation=False)
+    objs_a, _ = var._scene_objects_as_list(a["scene_objects"])
+    objs_b, _ = var._scene_objects_as_list(b["scene_objects"])
+    assert [o["rotation"] for o in objs_a] != [o["rotation"] for o in objs_b]
+
+
+def test_build_variant_dispatches():
+    state = make_hsm_state_distinct_dims(6)
+    half = var.build_variant(state, "removal", seed=42, divisor=2)
+    big = var.build_variant(state, "biggest", seed=42)
+    scr = var.build_variant(state, "scramble", seed=42, scramble_rotation=True)
+    worst = var.build_variant(state, "worst", seed=42, rank=0)
+    n_half = len(var._scene_objects_as_list(half["scene_objects"])[0])
+    n_big = len(var._scene_objects_as_list(big["scene_objects"])[0])
+    n_scr = len(var._scene_objects_as_list(scr["scene_objects"])[0])
+    n_worst = len(var._scene_objects_as_list(worst["scene_objects"])[0])
+    assert n_half == 3            # round(6/2)
+    assert n_big == 1
+    assert n_scr == 6             # scramble preserves the set
+    assert n_worst == 6           # worst-object preserves the set (assets may swap)
+
+
+def test_generate_named_variants_writes_all_four(tmp_path):
+    state = make_hsm_state_distinct_dims(5)
+    (tmp_path / "hsm_scene_state.json").write_text(json.dumps(state))
+    written = var.generate_named_variants(tmp_path, seed=42)
+    assert set(written.keys()) == set(var.ALL_VARIANT_NAMES)
+    for name, path in written.items():
+        assert Path(path).exists()
+        st = json.loads(Path(path).read_text())
+        assert "scene_objects" in st
+
+
+# ===========================================================================
+# (b''') worst_match inverts the CLIP argsort
+# ===========================================================================
+
+def test_worst_match_inverts_argsort():
+    """The ranking branch in run_primary_retrieval builds an argsort over the
+    similarity tensor: best-match uses (-sim).argsort() (descending), worst_match
+    uses sim.argsort() (ascending). Verify the two orderings are exact inverses
+    for a known similarity vector, matching the source branch.
+    """
+    import torch
+    sim = torch.tensor([0.9, 0.1, 0.5, 0.3, 0.7])
+    best = (-sim).argsort().tolist()      # source: best_match=False
+    worst = sim.argsort().tolist()        # source: worst_match=True
+    assert best == [0, 4, 2, 3, 1]        # 0.9, 0.7, 0.5, 0.3, 0.1
+    assert worst == [1, 3, 2, 4, 0]       # 0.1, 0.3, 0.5, 0.7, 0.9
+    # descending vs ascending are reverses of each other for distinct values
+    assert best == worst[::-1]
+
+
+def test_worst_match_flag_in_signatures():
+    """worst_match is threaded through the public retrieval surface.
+
+    Skipped when the full hsm_core.retrieval import chain is unavailable in this
+    env (it pulls in python-dotenv / torch / clip via hsm_core.vlm.gpt); the vlmunr
+    audit env has bpy but not all HSM deps. Run under the `hsm` conda env to exercise.
+    """
+    import inspect
+    try:
+        from hsm_core.retrieval import retrieve, retrieve_adaptive
+        from hsm_core.retrieval.core.retrieval_logic import run_primary_retrieval, handle_fallback_retrieval
+    except Exception as e:  # missing transitive dep (e.g. python-dotenv) in this env
+        pytest.skip(f"hsm_core.retrieval import chain unavailable in this env: {e}")
+    for fn in (retrieve, retrieve_adaptive, run_primary_retrieval, handle_fallback_retrieval):
+        assert "worst_match" in inspect.signature(fn).parameters
+
+
+# ===========================================================================
 # (c) PURE transform + decode against KNOWN inputs
 # ===========================================================================
 

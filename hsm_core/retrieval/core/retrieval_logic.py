@@ -370,21 +370,23 @@ async def handle_fallback_retrieval(
             for i, (bb_s, _, pth, m_id, r_info, pen_flg, constraint_info, cl_s, s_type) in enumerate(best_fallback_candidates[:use_top_k]):
                 logger.debug(f"  {i+1}. {Path(pth).name} (Type: {s_type}, Penalized: {pen_flg}, BBox: {bb_s:.4f}, CLIP: {cl_s:.4f}, MeshID: {m_id})")
 
-                # Select best fallback candidate
-                _, fb_selected_mesh, fb_selected_path, fb_selected_mesh_id, fb_selected_rotation_info, _, _, fb_clip_score, fb_search_type = best_fallback_candidates[0]
+            # Select best fallback candidate (run once, after the logging loop — it was
+            # previously mis-indented inside the loop, re-applying the same [0] mesh and
+            # re-adding to used_indices on every logging iteration).
+            _, fb_selected_mesh, fb_selected_path, fb_selected_mesh_id, fb_selected_rotation_info, _, _, fb_clip_score, fb_search_type = best_fallback_candidates[0]
 
-                apply_mesh_to_object(obj_fb_iter, fb_selected_mesh, str(fb_selected_path), fb_selected_mesh_id)
-                used_indices.add(fb_selected_mesh_id)
+            apply_mesh_to_object(obj_fb_iter, fb_selected_mesh, str(fb_selected_path), fb_selected_mesh_id)
+            used_indices.add(fb_selected_mesh_id)
 
-                logger.info(f"Fallback: Assigned mesh {Path(fb_selected_path).name} to '{obj_fb_iter.label}' via {fb_search_type} search. BBox: {obj_fb_iter.bounding_box.half_size}")
+            logger.info(f"Fallback: Assigned mesh {Path(fb_selected_path).name} to '{obj_fb_iter.label}' via {fb_search_type} search. BBox: {obj_fb_iter.bounding_box.half_size}")
 
-                # Update mesh_dict for same_per_label
-                if same_per_label:
-                     mesh_dict[obj_fb_iter.label] = {
-                        "mesh": deepcopy(obj_fb_iter.mesh),
-                        "path": obj_fb_iter.mesh_path,
-                        "rotation_info": fb_selected_rotation_info
-                    }
+            # Update mesh_dict for same_per_label
+            if same_per_label:
+                mesh_dict[obj_fb_iter.label] = {
+                    "mesh": deepcopy(obj_fb_iter.mesh),
+                    "path": obj_fb_iter.mesh_path,
+                    "rotation_info": fb_selected_rotation_info
+                }
         else:
             logger.info(f"Fallback: No loadable/optimizable candidates found for '{obj_fb_iter.label}' from any fallback search type.")
 
