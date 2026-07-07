@@ -22,7 +22,7 @@ MODEL: str = "gpt-5.1-2025-11-13"
 # the default OpenAI endpoint. When pointing at chatanywhere, also export
 # OPENAI_API_KEY=$CHATANYWHERE_API_KEY so the client authenticates correctly.
 # All four of base_url / api_key / model / temperature may be overridden via the
-# VLMUNR_OPENAI_* env vars (set by vlmunr_cli.py from its --base-url/--api-key/
+# VLMUNR_OPENAI_* env vars (set by cli.py from its --base-url/--api-key/
 # --model/--temperature flags) so the whole pipeline picks them up without
 # threading parameters through every create_session() call site.
 CUSTOM_URL: str = os.environ.get("VLMUNR_OPENAI_BASE_URL", "https://api.chatanywhere.tech/v1")
@@ -62,7 +62,7 @@ class Session(BaseVLMSession):
 
         Endpoint / API key / model / temperature resolution order:
           explicit arg -> VLMUNR_OPENAI_* env var -> module default.
-        This lets vlmunr_cli.py set the env vars once and have every Session
+        This lets cli.py set the env vars once and have every Session
         created across the pipeline pick them up.
         """
         load_dotenv()

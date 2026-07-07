@@ -40,16 +40,16 @@ HSSD_DIR=/path/to/hssd-models $PY vlmunr_render.py --scene-dir results/bedroom_0
 $PY -m pytest tests/ -q
 ```
 
-### Single-command generation + variants (`vlmunr_cli.py`)
+### Single-command generation + variants (`cli.py`)
 
-`vlmunr_cli.py` generates a scene from a text prompt end-to-end and (optionally)
+`cli.py` generates a scene from a text prompt end-to-end and (optionally)
 writes the four content variants derived from the base scene **without
 regenerating or re-calling the LLM**. Run it under the `hsm` conda env (it needs
 HSM's full deps; the `vlmunr` env only has bpy).
 
 ```bash
 conda activate hsm
-python vlmunr_cli.py \
+python cli.py \
     --prompt "A cozy bedroom with a bed, nightstand, and a wardrobe." \
     --base-url https://api.openai.com/v1 --api-key sk-... \
     --model gpt-4o-2024-08-06 --temperature 0.7 --variants

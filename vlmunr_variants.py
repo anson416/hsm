@@ -46,7 +46,7 @@ WORST_MATCH_RANKS = {}  # VLMUNR: alt_* dropped per methodology (keep within/cro
 SUBST_MODES = {"variant_subst_within": "within", "variant_subst_cross": "cross"}
 
 # ---------------------------------------------------------------------------
-# User-facing variant naming scheme (vlmunr_cli.py --variants)
+# User-facing variant naming scheme (cli.py --variants)
 # ---------------------------------------------------------------------------
 # Maps the CLI's stable variant name -> (family, kwargs) used to build it. Each
 # family resolves to one of the pure generator functions below.
@@ -655,7 +655,7 @@ def generate_all_variants(scene_dir: Path, seed: int = 42) -> Dict[str, str]:
 
 
 # ---------------------------------------------------------------------------
-# Named variant generation (user-facing scheme for vlmunr_cli.py --variants)
+# Named variant generation (user-facing scheme for cli.py --variants)
 # ---------------------------------------------------------------------------
 
 
