@@ -40,6 +40,45 @@ HSSD_DIR=/path/to/hssd-models $PY vlmunr_render.py --scene-dir results/bedroom_0
 $PY -m pytest tests/ -q
 ```
 
+### Single-command generation + variants (`vlmunr_cli.py`)
+
+`vlmunr_cli.py` generates a scene from a text prompt end-to-end and (optionally)
+writes the four content variants derived from the base scene **without
+regenerating or re-calling the LLM**. Run it under the `hsm` conda env (it needs
+HSM's full deps; the `vlmunr` env only has bpy).
+
+```bash
+conda activate hsm
+python vlmunr_cli.py \
+    --prompt "A cozy bedroom with a bed, nightstand, and a wardrobe." \
+    --base-url https://api.openai.com/v1 --api-key sk-... \
+    --model gpt-4o-2024-08-06 --temperature 0.7 --variants
+```
+
+Flags: `--prompt` (required), `--base-url`, `--api-key`, `--model`,
+`--temperature`, `--output` (default `outputs`), `--variants`, `--seed` (default 42).
+The LLM connection is wired through `VLMUNR_OPENAI_*` env vars (set by the CLI
+from the flags), which `hsm_core.vlm.gpt.Session` reads at construction — so every
+`create_session()` site across the pipeline picks them up without parameter
+threading.
+
+Output layout per run, under `outputs/<YYYYMMDD-HHMMSS>/` (UTC stamp):
+`config.json` (prompt + all configs), `room_scene.glb`,
+`hsm_scene_state.json` + `stk_scene_state.json` (the base scene, saved with
+`save_scene_state=True` so the richer `hsm_scene_state.json` is emitted),
+`scene.log`, `visualizations/`, `scene_motifs/`, and — when `--variants` —
+`hsm_scene_state_variant_{01_half,02_biggest-only,03_scrambled,04_worst-object}.json`.
+
+The four variants: **01_half** keeps `round(n/2)` objects (seeded sample);
+**02_biggest-only** keeps the single largest object by bbox volume;
+**03_scrambled** randomizes every object's position AND heading in-room (rotation
+too, per the spec); **04_worst-object** forks the saved state and re-runs HSM
+retrieval with the CLIP ranking inverted (`worst_match=True`, see
+`hsm_core/retrieval/core/retrieval_logic.py`) so each object's 3D asset is swapped
+for the lowest-CLIP match — no LLM re-call. 04 degrades gracefully (keeps
+originals, records intent under `_vlmunr_worst_match`) when HSSD/CLIP/OpenAI are
+absent.
+
 ## Filename scheme
 
 Written under `<scene-dir>/renderings/`:
