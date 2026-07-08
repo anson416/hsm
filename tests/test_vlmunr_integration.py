@@ -358,14 +358,44 @@ def test_build_variant_dispatches():
 
 
 def test_generate_named_variants_writes_all_four(tmp_path):
+    """Flat-source form (source_subdir=None): base state lives directly in
+    scene_dir; each variant is written to its OWN subfolder under scene_dir
+    using the canonical state filename the renderer looks for."""
     state = make_hsm_state_distinct_dims(5)
     (tmp_path / "hsm_scene_state.json").write_text(json.dumps(state))
     written = var.generate_named_variants(tmp_path, seed=42)
     assert set(written.keys()) == set(var.ALL_VARIANT_NAMES)
     for name, path in written.items():
-        assert Path(path).exists()
-        st = json.loads(Path(path).read_text())
+        p = Path(path)
+        # Each variant lives in its own subfolder named after the variant...
+        assert p.parent.name == name
+        assert p.parent.parent == tmp_path
+        # ...under the canonical name (hsm format -> hsm_scene_state.json).
+        assert p.name == "hsm_scene_state.json"
+        assert p.exists()
+        st = json.loads(p.read_text())
         assert "scene_objects" in st
+
+
+def test_generate_named_variants_source_subdir_layout(tmp_path):
+    """cli.py layout: base scene under <run>/base/, variants as sibling subfolders
+    <run>/variant_*/, each with a standalone canonical-named state file."""
+    run_dir = tmp_path
+    base_dir = run_dir / "base"
+    base_dir.mkdir()
+    state = make_hsm_state_distinct_dims(5)
+    (base_dir / "hsm_scene_state.json").write_text(json.dumps(state))
+
+    written = var.generate_named_variants(run_dir, seed=42, source_subdir="base")
+    assert set(written.keys()) == set(var.ALL_VARIANT_NAMES)
+    for name, path in written.items():
+        p = Path(path)
+        assert p.parent == run_dir / name          # sibling of base/
+        assert p.parent.parent == run_dir
+        assert p.name == "hsm_scene_state.json"
+        assert p.exists()
+    # base/ is untouched (variants are forks, not in-place edits of base)
+    assert (base_dir / "hsm_scene_state.json").exists()
 
 
 # ===========================================================================

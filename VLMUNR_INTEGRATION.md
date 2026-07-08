@@ -63,11 +63,16 @@ from the flags), which `hsm_core.vlm.gpt.Session` reads at construction — so e
 threading.
 
 Output layout per run, under `outputs/<YYYYMMDD-HHMMSS>/` (UTC stamp):
-`config.json` (prompt + all configs), `room_scene.glb`,
-`hsm_scene_state.json` + `stk_scene_state.json` (the base scene, saved with
-`save_scene_state=True` so the richer `hsm_scene_state.json` is emitted),
-`scene.log`, `visualizations/`, `scene_motifs/`, and — when `--variants` —
-`hsm_scene_state_variant_{01_half,02_biggest-only,03_scrambled,04_worst-object}.json`.
+`config.json` (prompt + all configs) at the top level; `base/` holding the
+generated base scene (`room_scene.glb`, `hsm_scene_state.json` +
+`stk_scene_state.json` — saved with `save_scene_state=True` so the richer
+`hsm_scene_state.json` is emitted — plus `scene.log`, `visualizations/`,
+`scene_motifs/`); and — when `--variants` — sibling subfolders
+`variant_01_half/`, `variant_02_biggest-only/`, `variant_03_scrambled/`,
+`variant_04_worst-object/`, each holding its own standalone
+`hsm_scene_state.json` (canonical name) so it can be rendered independently
+(`python vlmunr_render.py --scene-dir outputs/<stamp>/variant_03_scrambled`
+writes `renderings/` into that subfolder).
 
 The four variants: **01_half** keeps `round(n/2)` objects (seeded sample);
 **02_biggest-only** keeps the single largest object by bbox volume;

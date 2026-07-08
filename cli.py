@@ -19,16 +19,31 @@ Output layout (per run), under ./outputs/ :
 
     outputs/<YYYYMMDD-HHMMSS>/
         config.json                       prompt + all CLI/LLM/data configs
-        room_scene.glb                    base scene GLB
-        hsm_scene_state.json              base scene state (mesh_path + pose)
-        stk_scene_state.json              base scene state (column-major STK)
-        scene.log                         run log
-        visualizations/ ...               stage visualizations
-        scene_motifs/ ...                 motif GLBs/pickles
-        hsm_scene_state_variant_01_half.json
-        hsm_scene_state_variant_02_biggest-only.json
-        hsm_scene_state_variant_03_scrambled.json
-        hsm_scene_state_variant_04_worst-object.json   (only with --variants)
+        base/                             the generated BASE scene
+            room_scene.glb                base scene GLB
+            hsm_scene_state.json          base scene state (mesh_path + pose)
+            stk_scene_state.json          base scene state (column-major STK)
+            scene.log                     run log
+            visualizations/ ...           stage visualizations
+            scene_motifs/ ...             motif GLBs/pickles
+            renderings/ ...               (only if you render this scene)
+        variant_01_half/                  (only with --variants)
+            hsm_scene_state.json          round(n/2) objects kept
+            renderings/ ...               (only if you render this variant)
+        variant_02_biggest-only/
+            hsm_scene_state.json          single largest object kept
+        variant_03_scrambled/
+            hsm_scene_state.json          positions + headings randomized in-room
+        variant_04_worst-object/
+            hsm_scene_state.json          assets swapped for worst-CLIP matches
+
+Each variant subfolder holds a standalone scene-state file under the canonical
+name (hsm_scene_state.json / stk_scene_state.json) the renderer looks for, so
+you can render any variant on its own:
+
+    conda activate vlmunr   # bpy lives here
+    python vlmunr_render.py --scene-dir outputs/<stamp>/variant_03_scrambled
+    # -> writes outputs/<stamp>/variant_03_scrambled/renderings/
 
 Usage:
     conda activate hsm
@@ -356,10 +371,16 @@ async def _run_pipeline(cfg: DictConfig | ListConfig, run_dir: Path, logger) -> 
     start_time = time.time()
     logger.info("Starting scene generation pipeline (cli)")
 
+    # All base-scene artifacts (room_scene.glb, hsm/stk_scene_state.json,
+    # visualizations/, scene_motifs/, scene.log) go under <run_dir>/base/ so the
+    # run dir has a clean base/ + variant_*/ + config.json layout.
+    base_dir = run_dir / "base"
+    base_dir.mkdir(parents=True, exist_ok=True)
+
     context = await setup_scene_generation(
         cfg, project_root=PROJECT_ROOT,
-        output_dir_override=run_dir,   # write everything under outputs/<timestamp>/
-        timestamp=False,               # run_dir IS the dir; no extra timestamp subdir
+        output_dir_override=base_dir,  # write everything under outputs/<timestamp>/base/
+        timestamp=False,               # base_dir IS the dir; no extra timestamp subdir
     )
     context["start_time"] = start_time
     pipeline = create_processing_pipeline(cfg, context["is_loaded_scene"])
@@ -370,8 +391,9 @@ async def _run_pipeline(cfg: DictConfig | ListConfig, run_dir: Path, logger) -> 
         context = await stage_func(context, cfg)
 
     # The pipeline saved once with save_scene_state=False (default). Re-save WITH
-    # save_scene_state=True so hsm_scene_state.json is emitted — the variants layer
-    # and renderer prefer it (carries mesh_path + pose, no HSSD_DIR needed).
+    # save_scene_state=True so hsm_scene_state.json is emitted under base/ — the
+    # variants layer and renderer prefer it (carries mesh_path + pose, no HSSD_DIR
+    # needed).
     scene = context["scene"]
     out_dir = context["output_dir_override"]
     scene.save(out_dir, recreate_scene=True, save_scene_state=True)
@@ -387,18 +409,24 @@ async def _run_pipeline(cfg: DictConfig | ListConfig, run_dir: Path, logger) -> 
 
 
 def _generate_variants(run_dir: Path, seed: int, logger) -> dict:
-    """Generate the four named variants from the base scene state in run_dir."""
+    """Generate the four named variants from the base scene state under run_dir/base/.
+
+    Each variant is written to its own subfolder <run_dir>/<variant_name>/ with
+    the canonical hsm_scene_state.json (or stk_scene_state.json) so it can be
+    rendered independently via vlmunr_render.py --scene-dir <that subfolder>.
+    """
     import vlmunr_variants as var
 
-    hsm_path = run_dir / "hsm_scene_state.json"
-    stk_path = run_dir / "stk_scene_state.json"
+    base_dir = run_dir / "base"
+    hsm_path = base_dir / "hsm_scene_state.json"
+    stk_path = base_dir / "stk_scene_state.json"
     if not hsm_path.exists() and not stk_path.exists():
         logger.warning(
             "No scene-state file found in %s; skipping variants. "
-            "(Generation may not have placed any objects.)", run_dir
+            "(Generation may not have placed any objects.)", base_dir
         )
         return {}
-    written = var.generate_named_variants(run_dir, seed=seed)
+    written = var.generate_named_variants(run_dir, seed=seed, source_subdir="base")
     for name, path in written.items():
         logger.info(f"Variant {name} -> {path}")
     return written
@@ -473,7 +501,7 @@ def main(argv=None) -> int:
     except Exception as e:
         logger.error(f"Scene generation failed: {e}")
         logger.error(traceback.format_exc())
-        print(f"HSM Scene generation failed at {stamp} — see {run_dir}/scene.log")
+        print(f"HSM Scene generation failed at {stamp} — see {run_dir}/base/scene.log")
         return 1
 
     written_variants: dict = {}

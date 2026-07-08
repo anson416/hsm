@@ -678,20 +678,46 @@ def build_variant(state: dict, family: str, seed: int, **kwargs) -> dict:
     raise ValueError(f"Unknown variant family: {family!r}")
 
 
+def _canonical_state_filename(state: dict) -> str:
+    """The on-disk filename the renderer looks for, matching the state's format."""
+    return "hsm_scene_state.json" if detect_format(state) == "hsm" else "stk_scene_state.json"
+
+
 def generate_named_variants(
     scene_dir: Path,
     seed: int = 42,
     names: Optional[List[str]] = None,
+    source_subdir: Optional[str] = None,
 ) -> Dict[str, str]:
-    """Generate the user-facing named variants under `scene_dir`.
+    """Generate the user-facing named variants, each in its OWN subfolder.
 
-    Writes, for each name in `names` (default ALL_VARIANT_NAMES), a file
-    `<scene-state-stem>_<name>.json` next to the source scene state. Returns
-    {variant_name: output_path}. Uses a freshly loaded copy of the base state per
-    variant so variants are independent forks (never compound on each other).
+    Layout (matches cli.py's run-dir contract):
+
+        <scene_dir>/                      <- the run dir (e.g. outputs/<stamp>/)
+            <source_subdir>/              <- base scene lives here ("base")
+                hsm_scene_state.json
+            variant_01_half/
+                hsm_scene_state.json      <- canonical name; renderer finds it
+            variant_02_biggest-only/
+                hsm_scene_state.json
+            ...
+
+    - ``scene_dir``: the run dir. Variant subfolders are created as its children.
+    - ``source_subdir``: subfolder under ``scene_dir`` holding the base scene
+      state (``"base"`` for cli.py). If None, the base state is read directly
+      from ``scene_dir`` (so variant subfolders are also children of
+      ``scene_dir`` — the original flat-source behavior the tests use).
+    - Each variant is written under its own subfolder named after the variant,
+      using the canonical state filename (``hsm_scene_state.json`` /
+      ``stk_scene_state.json``) so ``vlmunr_render.py --scene-dir <that
+      subfolder>`` resolves it and writes ``renderings/`` next to it.
+    - A freshly loaded copy of the base state is used per variant so each is an
+      independent fork (never compounds on another).
+
+    Returns {variant_name: output_path}.
     """
     names = names or ALL_VARIANT_NAMES
-    src, _ = _load(scene_dir)  # source path only; re-load fresh per variant below
+    src_dir = scene_dir / source_subdir if source_subdir else scene_dir
     written: Dict[str, str] = {}
     for name in names:
         if name not in VARIANT_SPECS:
@@ -700,9 +726,15 @@ def generate_named_variants(
         # Re-load the base state each iteration so each variant is an independent fork
         # of the original (apply_worst_match/scramble/etc. deepcopy, but loading fresh
         # also protects against any in-place mutation of the loaded dict).
-        _, base_state = _load(scene_dir)
+        _, base_state = _load(src_dir)
         new_state = build_variant(base_state, family, seed, **kwargs)
-        written[name] = str(_write_variant(src, new_state, name))
+
+        variant_dir = scene_dir / name
+        variant_dir.mkdir(parents=True, exist_ok=True)
+        out = variant_dir / _canonical_state_filename(new_state)
+        with open(out, "w") as f:
+            json.dump(new_state, f, indent=4)
+        written[name] = str(out)
     return written
 
 
