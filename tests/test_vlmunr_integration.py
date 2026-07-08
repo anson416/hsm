@@ -101,33 +101,25 @@ def make_hsm_state(n, as_dict=True):
 # (a) Filename builders
 # ===========================================================================
 
-def test_master_filename_exact():
-    assert rnd.master_filename(512, 50, 0, 0, "city") == "render_512_50_0_0_city.png"
-    assert rnd.master_filename(1024, 200, 60, 330, "sunset") == "render_1024_200_60_330_sunset.png"
+def test_transparent_filename_exact():
+    assert rnd.transparent_filename(512, 50, 0, 0, "city") == \
+        "render_res-512_focal-50_pitch-0_yaw-0_env-city.png"
+    assert rnd.transparent_filename(1024, 200, 60, 330, "sunset") == \
+        "render_res-1024_focal-200_pitch-60_yaw-330_env-sunset.png"
 
 
-def test_composite_filename_exact():
-    assert rnd.composite_filename(512, 50, (128, 128, 128), 0, 0, "city") == \
-        "render_512_50_128_128_128_0_0_city.png"
-    assert rnd.composite_filename(224, 24, (0, 18, 65), 30, 90, "forest") == \
-        "render_224_24_0_18_65_30_90_forest.png"
-
-
-def test_phase_levels():
-    assert cfg.phase_levels("1a")["vary"] == "resolution"
-    assert cfg.phase_levels("1a")["levels"] == cfg.RESOLUTIONS
-    assert cfg.phase_levels("1b")["levels"][0] == (0, 0, 0)
-    assert cfg.phase_levels("1c")["levels"] == cfg.HDRIS
-    assert cfg.phase_levels("1d")["levels"] == cfg.FOCAL_LENGTHS
-    grid = cfg.phase_levels("2")["levels"]
-    assert len(grid) == len(cfg.PITCHES) * len(cfg.YAWS)
-    assert grid[0] == (0, 0)
-    with pytest.raises(ValueError):
-        cfg.phase_levels("9z")
+def test_composited_filename_exact():
+    assert rnd.composited_filename(512, 50, 0, 0, "city", (128, 128, 128)) == \
+        "render_res-512_focal-50_pitch-0_yaw-0_env-city_bg-128-128-128.png"
+    assert rnd.composited_filename(224, 24, 30, 90, "forest", (0, 18, 65)) == \
+        "render_res-224_focal-24_pitch-30_yaw-90_env-forest_bg-0-18-65.png"
+    # white baseline
+    assert rnd.composited_filename(512, 50, 0, 0, "city", (255, 255, 255)) == \
+        "render_res-512_focal-50_pitch-0_yaw-0_env-city_bg-255-255-255.png"
 
 
 # ===========================================================================
-# (a') Factor levels match paper Table 1 + new phases
+# (a') Factor levels + RenderConfig sweep model
 # ===========================================================================
 
 def test_factor_level_counts():
@@ -135,59 +127,85 @@ def test_factor_level_counts():
     assert len(cfg.FOCAL_LENGTHS) == 7
     assert len(cfg.PITCHES) == 7
     assert len(cfg.YAWS) == 8
-    assert len(cfg.BACKGROUND_GRAYS) == 6
-    assert len(cfg.BACKGROUND_CHROMATIC) == 3
+    assert len(cfg.BACKGROUNDS) == 10   # 6 grays incl. 118 + 3 chromatic + black/white
+    assert len(cfg.HDRIS) == 8
 
 
 def test_factor_level_values():
     assert cfg.RESOLUTIONS == [196, 224, 256, 336, 384, 448, 512, 768, 1024]
     assert cfg.FOCAL_LENGTHS == [16, 24, 35, 50, 85, 100, 200]
-    assert cfg.BACKGROUND_GRAYS == [0, 65, 128, 186, 204, 255]
-    assert cfg.BACKGROUND_CHROMATIC == [(255, 0, 0), (0, 255, 0), (0, 0, 255)]
     assert cfg.PITCHES == [0, 15, 30, 45, 60, 75, 90]
     assert cfg.YAWS == [0, 45, 90, 135, 180, 225, 270, 315]
-    assert len(cfg.HDRIS) == 8
-    assert cfg.FLOOR_TEXTURE_BACKGROUND == "floor_texture"
-    assert cfg.BASELINE_YAW_PITCH == 45
+    assert cfg.HDRIS == ["city", "courtyard", "forest", "interior", "night",
+                         "studio", "sunrise", "sunset"]
+    assert (0, 0, 0) in cfg.BACKGROUNDS
+    assert (118, 118, 118) in cfg.BACKGROUNDS
+    assert (255, 255, 255) in cfg.BACKGROUNDS
+    assert (255, 0, 0) in cfg.BACKGROUNDS and (0, 255, 0) in cfg.BACKGROUNDS \
+        and (0, 0, 255) in cfg.BACKGROUNDS
+    assert cfg.BASELINE_BACKGROUND == (255, 255, 255)
+    assert cfg.BASELINE_RESOLUTION == 512
+    assert cfg.BASELINE_FOCAL_LENGTH == 50
+    assert cfg.BASELINE_HDRI == "city"
+    assert cfg.BASELINE_PITCH == 0
+    assert cfg.BASELINE_YAW == 0
+    assert cfg.BASELINE_YAW_PITCH == 45   # pitch fixed at 45 for the yaw sweep
 
 
-def test_phase_levels_chroma():
-    spec = cfg.phase_levels("1b_chroma")
-    assert spec["vary"] == "background"
-    assert spec["levels"] == [(255, 0, 0), (0, 255, 0), (0, 0, 255)]
-    assert len(spec["levels"]) == 3
+def test_single_render_config_is_baseline_white_topdown():
+    rc = cfg.single_render_config()
+    assert rc.key == (512, 50, 0, 0, "city")
+    assert rc.backgrounds == [(255, 255, 255)]
+    assert rc.resolution == 512 and rc.focal_length == 50
+    assert rc.pitch == 0 and rc.yaw == 0 and rc.hdri == "city"
 
 
-def test_phase_levels_2_yaw():
-    spec = cfg.phase_levels("2_yaw")
-    assert spec["vary"] == "yaw"
-    assert spec["pitch"] == 45
-    assert spec["levels"] == cfg.YAWS
-    assert len(spec["levels"]) == 8
+def test_render_all_configs_covers_every_sweep_level():
+    allc = cfg.render_all_configs()
+    keys = {rc.key for rc in allc}
+    # every resolution level appears
+    for res in cfg.RESOLUTIONS:
+        assert (res, 50, 0, 0, "city") in keys
+    # every focal length
+    for f in cfg.FOCAL_LENGTHS:
+        assert (512, f, 0, 0, "city") in keys
+    # every pitch (yaw 0)
+    for p in cfg.PITCHES:
+        assert (512, 50, p, 0, "city") in keys
+    # every yaw (pitch fixed at 45)
+    for y in cfg.YAWS:
+        assert (512, 50, 45, y, "city") in keys
+    # every env
+    for e in cfg.HDRIS:
+        assert (512, 50, 0, 0, e) in keys
 
 
-def test_phase_levels_2_pitch():
-    spec = cfg.phase_levels("2_pitch")
-    assert spec["vary"] == "pitch"
-    assert spec["yaw"] == 0
-    assert spec["levels"] == cfg.PITCHES
-    assert len(spec["levels"]) == 7
+def test_render_all_configs_dedups_and_unions_backgrounds():
+    allc = cfg.render_all_configs()
+    # The baseline camera config is touched by EVERY sweep + the bg sweep, so it
+    # must collect all 10 background colors (union), but appear exactly once.
+    baselines = [rc for rc in allc if rc.key == (512, 50, 0, 0, "city")]
+    assert len(baselines) == 1
+    assert set(baselines[0].backgrounds) == set(cfg.BACKGROUNDS)
+    # overall dedup: keys are unique
+    keys = [rc.key for rc in allc]
+    assert len(keys) == len(set(keys))
 
 
-def test_phase_levels_dict_shape_preserved():
-    # phase_levels still returns a DICT with the documented keys for every phase.
-    for ph in cfg.ALL_PHASES:
-        spec = cfg.phase_levels(ph)
-        assert isinstance(spec, dict)
-        for key in ("resolution", "focal_length", "background", "hdri", "pitch", "yaw", "vary", "levels"):
-            assert key in spec
+def test_render_all_configs_yaw_uses_pitch_45():
+    allc = cfg.render_all_configs()
+    yaw_keys = [rc for rc in allc if rc.pitch == 45]
+    # all 8 yaws present at pitch 45, none at pitch 0 except the baseline sweeps
+    yaw_vals = {rc.yaw for rc in yaw_keys}
+    assert yaw_vals == set(cfg.YAWS)
 
 
-def test_all_phases_list():
-    assert "1b_chroma" in cfg.ALL_PHASES
-    assert "2_pitch" in cfg.ALL_PHASES
-    assert "2_yaw" in cfg.ALL_PHASES
-    assert "2" in cfg.ALL_PHASES  # backward compat retained
+def test_render_all_configs_backgrounds_are_white_when_not_bg_sweep():
+    allc = cfg.render_all_configs()
+    # Every config NOT in the baseline set should carry only the white bg.
+    for rc in allc:
+        if rc.key != (512, 50, 0, 0, "city"):
+            assert rc.backgrounds == [(255, 255, 255)]
 
 
 # ===========================================================================
@@ -503,6 +521,124 @@ def test_construct_hssd_mesh_path():
 
 
 # ===========================================================================
+# (c) Dollhouse shell — arch parsing + wall-quad tiling (PURE)
+# ===========================================================================
+
+def _hsm_shell_state():
+    """4x4 square room: door centered on the y=0 wall, window on the x=0 wall."""
+    return {
+        "room_vertices": [[0, 0], [4, 0], [4, 4], [0, 4]],
+        "door_location": [2, 0],
+        "window_location": [[0, 2]],
+        "scene_objects": {},
+    }
+
+
+def test_parse_shell_spec_hsm_floor_and_walls():
+    spec = rnd.parse_shell_spec(_hsm_shell_state(), "hsm")
+    # floor flipped to Blender XY: (x, -z). Order is normalized to CCW (+Z normal).
+    fv = rnd.shell_floor_verts3d(spec)
+    assert set((round(v[0], 6), round(v[1], 6)) for v in fv) == {
+        (0.0, 0.0), (4.0, 0.0), (4.0, -4.0), (0.0, -4.0)
+    }
+    # CCW => positive signed area (standard shoelace) so the face normal is +Z.
+    s = sum(fv[i][0] * fv[(i + 1) % 4][1] - fv[(i + 1) % 4][0] * fv[i][1]
+           for i in range(4))
+    assert s > 0.0
+    assert len(spec["walls"]) == 4
+    # door opening lands on the wall running (0,0)->(4,0): centered at u=2, w=0.9
+    w0 = spec["walls"][0]
+    door = [o for o in w0["openings"] if o[2] == 0.0]  # z0==0 => reaches floor => door
+    assert len(door) == 1
+    u0, u1, z0, z1 = door[0]
+    assert abs((u0 + u1) / 2 - 2.0) < 1e-6
+    assert abs((u1 - u0) - rnd.DEFAULT_DOOR_WIDTH) < 1e-6
+    assert abs(z1 - rnd.DEFAULT_DOOR_HEIGHT) < 1e-6
+    # window opening lands on the wall running (0,4)->(0,0): centered at u=2 (mid)
+    # find the wall whose endpoints share x==0
+    winwall = next(w for w in spec["walls"] if w["a"][0] == 0.0 and w["b"][0] == 0.0)
+    win = [o for o in winwall["openings"] if o[2] > 0.0]  # z0>0 => window
+    assert len(win) == 1
+    assert abs(win[0][2] - rnd.DEFAULT_WINDOW_BOTTOM_HEIGHT) < 1e-6
+
+
+def test_parse_shell_spec_empty_when_no_room():
+    spec = rnd.parse_shell_spec({"scene_objects": {}}, "hsm")
+    assert spec == rnd.EMPTY_SHELL_SPEC
+
+
+def test_wall_quad_tiles_solid_wall_is_one_quad():
+    # a solid 4m wall, 2.5m tall, no openings, centroid below it -> 1 quad.
+    a, b = (0.0, 0.0), (4.0, 0.0)
+    quads = rnd.wall_quad_tiles(a, b, 2.5, [], centroid=(0.0, -2.0))
+    assert len(quads) == 1
+    q = quads[0]
+    assert len(q) == 4
+    # the wall lies in the XZ plane (y==0), so its face normal is +/-Y.
+    # centroid (0,-2) is below the wall, so OUTWARD (away from room interior)
+    # is +Y. The quad is wound so its front-face normal points outward (+Y).
+    v0, v1, v2 = q[0], q[1], q[2]
+    e1 = (v1[0]-v0[0], v1[1]-v0[1], v1[2]-v0[2])
+    e2 = (v2[0]-v0[0], v2[1]-v0[1], v2[2]-v0[2])
+    ny = e1[2]*e2[0] - e1[0]*e2[2]   # Y component of e1 x e2
+    assert ny > 0.0   # outward normal points +Y (away from centroid at -Y)
+
+
+def test_wall_quad_tiles_cut_out_opening():
+    # wall with one door opening reaching the floor (z in [0, 2.0]) spanning the
+    # middle: leaves left strip + right strip (full height) + top strip above
+    # the door (z in [2.0, 2.5]) = 3 quads.
+    a, b = (0.0, 0.0), (4.0, 0.0)
+    # door: u in [1.55, 2.45], z in [0, 2.0]
+    quads = rnd.wall_quad_tiles(a, b, 2.5, [(1.55, 2.45, 0.0, 2.0)], centroid=(0.0, -2.0))
+    assert len(quads) == 3
+    # no quad vertex should lie strictly inside the opening box
+    for q in quads:
+        for v in q:
+            u = v[0]   # along wall
+            z = v[2]
+            inside = (1.55 < u < 2.45) and (0.0 < z < 2.0)
+            assert not inside
+
+
+def test_shell_wall_quads_total():
+    spec = rnd.parse_shell_spec(_hsm_shell_state(), "hsm")
+    quads = rnd.shell_wall_quads(spec)
+    # 3 walls solid (1 quad each) + 1 wall with a door + 1 wall with a window.
+    # door wall: 4 quads (left/right full + top). window wall: 5 quads
+    # (left/right full-height + bottom strip + top strip + middle above window? ->
+    #  actually left+right full + below-window + above-window + between? verify >0)
+    assert len(quads) > 0
+    # every quad has exactly 4 verts
+    assert all(len(q) == 4 for q in quads)
+
+
+def test_parse_shell_spec_stk_arch_holes():
+    # stk arch carries precomputed hole boxes; ensure they round-trip into openings.
+    stk = {
+        "scene": {
+            "object": [],
+            "arch": {
+                "elements": [
+                    {"type": "Wall", "height": 2.5,
+                     "points": [[0, 0, 0], [-4, 0, 0]],   # stk [-hsm_x,0,hsm_z]
+                     "holes": [{"type": "Door", "box": {"min": [1.55, 0], "max": [2.45, 2.0]}}]},
+                    {"type": "Floor", "points": [[0, 0, 0], [-4, 0, 0], [-4, 0, 4], [0, 0, 4]]},
+                ]
+            }
+        }
+    }
+    spec = rnd.parse_shell_spec(stk, "stk")
+    assert len(spec["walls"]) == 1
+    w = spec["walls"][0]
+    # stk point [-hsm_x,0,hsm_z] -> Blender XY (-(-hsm_x), -(hsm_z))... undo flip:
+    # Blender (x,y) = (-p[0], -p[2]). p=[0,0,0]->(0,0); p=[-4,0,0]->(4,0)
+    assert w["a"] == (0.0, 0.0) and w["b"] == (4.0, 0.0)
+    assert w["openings"] == [(1.55, 2.45, 0.0, 2.0)]
+    assert len(spec["floor"]) == 4
+
+
+# ===========================================================================
 # (b'') Layout scramble — both state formats
 # ===========================================================================
 
@@ -652,3 +788,52 @@ def test_bpy_smoke_render_cube(tmp_path):
     assert proc.returncode == 0, f"smoke render failed:\n{proc.stdout}\n{proc.stderr}"
     assert out.exists()
     assert out.stat().st_size > 0
+
+
+SHELL_RENDER_SCRIPT = r'''
+import json, os, sys
+sys.path.insert(0, {root!r})
+scene_dir = {scene_dir!r}
+state = {{
+    "room_vertices": [[0,0],[4,0],[4,4],[0,4]],
+    "door_location": [2, 0],
+    "window_location": [[0, 2]],
+    "scene_objects": [],
+}}
+os.makedirs(scene_dir, exist_ok=True)
+with open(os.path.join(scene_dir, "hsm_scene_state.json"), "w") as f:
+    json.dump(state, f)
+import vlmunr_render as r, vlmunr_config as c
+# baseline single config (top-down) + one oblique, to exercise shell + culling.
+rcs = [
+    c.RenderConfig(128, 50, 0, 0, "city", [(255, 255, 255)]),     # top-down
+    c.RenderConfig(128, 50, 45, 0, "city", [(255, 255, 255)]),    # oblique
+]
+outs = r.render_configs(__import__("pathlib").Path(scene_dir), rcs, None)
+sys.exit(0 if all(os.path.exists(o) and os.path.getsize(o) > 0 for o in outs) else 1)
+'''
+
+
+def test_bpy_smoke_render_shell_with_openings(tmp_path):
+    """render_configs on a synthetic hsm scene builds the dollhouse shell (floor
+    + walls with a door & a window opening) and writes the transparent master +
+    white composite for a top-down and an oblique config. Subprocess (bpy fd
+    redirect)."""
+    import subprocess
+
+    pytest.importorskip("bpy")
+    scene_dir = tmp_path / "shell_scene"
+    script = SHELL_RENDER_SCRIPT.format(root=str(ROOT), scene_dir=str(scene_dir))
+    proc = subprocess.run(
+        [sys.executable, "-c", script],
+        capture_output=True, text=True, timeout=600,
+    )
+    assert proc.returncode == 0, f"shell render failed:\n{proc.stdout}\n{proc.stderr}"
+    rend = scene_dir / "renderings"
+    # 2 configs * (transparent master + 1 white composite) = 4 files
+    files = sorted(p.name for p in rend.iterdir())
+    assert len(files) == 4
+    assert "render_res-128_focal-50_pitch-0_yaw-0_env-city.png" in files
+    assert "render_res-128_focal-50_pitch-0_yaw-0_env-city_bg-255-255-255.png" in files
+    assert "render_res-128_focal-50_pitch-45_yaw-0_env-city.png" in files
+    assert "render_res-128_focal-50_pitch-45_yaw-0_env-city_bg-255-255-255.png" in files

@@ -9,14 +9,16 @@ factor-sweep contract, and content-variant generators.
 
 | File | Purpose |
 |------|---------|
-| `vlmunr_bpa.py` | Blender helper library (`Builder`, `Renderer`, `clear`, `initialize`, `import_obj`, `transform`). Copied verbatim from the `vlm-unreliability` repo. |
+| `vlmunr_bpa.py` | Blender helper library (`Builder`, `Renderer`, `clear`, `initialize`, `import_obj`, `transform`). Copied from the `vlm-unreliability` repo with a GLB-import fix. |
 | `vlmunr_hdri/` | 8 HDRI environment maps (`*.exr`) + `license.txt`. |
-| `vlmunr_config.py` | Factor levels, baseline config, `phase_levels(phase)` helper. |
-| `vlmunr_render.py` | Scene parsing (PURE functions) + headless bpy renderer with phase sweeps. |
+| `vlmunr_config.py` | Factor levels, white baseline, `RenderConfig`, `single_render_config()` + `render_all_configs()` (deduped six-factor sweep). |
+| `vlmunr_render.py` | Scene parsing (PURE: STK decode, arch/shell spec, wall-quad tiling) + headless bpy renderer (`render_configs`): transparent master + per-bg composites. |
+| `vlmunr_shell.py` | Dollhouse room-shell builder: floor (opaque) + walls with door/window cutout openings, backface-culling material (per-normal transparency). |
 | `vlmunr_variants.py` | Removal + worst-match + within/cross substitution + layout-scramble content-variant generators (PURE + lazy retrieval hook). |
-| `tests/test_vlmunr_integration.py` | pytest: filename builders, removal/renumber, PURE transform/decode, bpy smoke render. |
+| `cli.py` | End-to-end driver: `--prompt` (generate + optional variants + optional render) or `--path` (render existing). `--render` / `--render-all`. |
+| `tests/test_vlmunr_integration.py` | pytest: filenames, RenderConfig sweeps, STK encode/decode, shell tiling/arch parsing, bpy smoke renders. |
 | `gen.sh` | Scene-generation driver (loops prompts -> `main.py`). |
-| `run.sh` | Variant + render driver (loops scene dirs). |
+| `run.sh` | Per-subdir render driver (loops scene dirs -> `vlmunr_render.py --mode`). |
 
 ## Run commands
 
@@ -26,15 +28,16 @@ PY=/Users/anson/miniforge3/envs/vlmunr/bin/python
 # 1. Generate scenes (writes results/<name>/)
 ./gen.sh
 
-# 2. Generate variants + render all phases for every scene dir
-./run.sh                # phase 'all'
-./run.sh 1a             # single phase
+# 2. Render every subfolder of a run dir (base/ + variant_*/)
+./run.sh                    # mode 'all' (full six-factor sweep)
+./run.sh single             # baseline only
+RUN_DIR=outputs/20260708-023434 ./run.sh all
 
-# Or invoke directly:
-$PY vlmunr_variants.py --scene-dir results/bedroom_01 --seed 42
-$PY vlmunr_render.py    --scene-dir results/bedroom_01 --phase 2_yaw
+# Or invoke the renderer directly on one subfolder:
+$PY vlmunr_render.py --scene-dir outputs/20260708-023434/base --mode all
+$PY vlmunr_render.py --scene-dir results/bedroom_01            --mode single
 # For stk-only scenes, set HSSD_DIR so meshes resolve:
-HSSD_DIR=/path/to/hssd-models $PY vlmunr_render.py --scene-dir results/bedroom_01 --phase 1a
+HSSD_DIR=/path/to/hssd-models $PY vlmunr_render.py --scene-dir results/bedroom_01 --mode all
 
 # Tests
 $PY -m pytest tests/ -q
@@ -44,19 +47,29 @@ $PY -m pytest tests/ -q
 
 `cli.py` generates a scene from a text prompt end-to-end and (optionally)
 writes the four content variants derived from the base scene **without
-regenerating or re-calling the LLM**. Run it under the `hsm` conda env (it needs
-HSM's full deps; the `vlmunr` env only has bpy).
+regenerating or re-calling the LLM**, and (optionally) renders the scene(s) with
+Blender. Run it under the `hsm` conda env (it needs HSM's full deps); the
+`vlmunr` env only has bpy, so cli.py shells out to that interpreter for rendering
+(override with `--vlmunr-python` / `VLMUNR_PYTHON`).
 
 ```bash
 conda activate hsm
-python cli.py \
-    --prompt "A cozy bedroom with a bed, nightstand, and a wardrobe." \
+# generate + variants + render the baseline of each scene:
+python cli.py --prompt "A cozy bedroom with a bed, nightstand, and a wardrobe." \
     --base-url https://api.openai.com/v1 --api-key sk-... \
-    --model gpt-4o-2024-08-06 --temperature 0.7 --variants
+    --model gpt-4o-2024-08-06 --temperature 0.7 --variants --render
+# generate + variants + render the FULL six-factor sweep:
+python cli.py --prompt "..." --variants --render-all
+# render an EXISTING run (no generation) — base/ + every variant_*:
+python cli.py --path outputs/20260708-023434 --render-all
 ```
 
-Flags: `--prompt` (required), `--base-url`, `--api-key`, `--model`,
-`--temperature`, `--output` (default `outputs`), `--variants`, `--seed` (default 42).
+Flags: `--prompt` (generate) **or** `--path` (render existing) — exactly one;
+`--base-url`, `--api-key`, `--model`, `--temperature`; `--hssd-dir`,
+`--data-dir` (dataset overrides); `--output` (default `outputs`); `--variants`
+(generate the four content variants); `--seed` (default 42); `--render`
+(baseline render) **or** `--render-all` (six-factor sweep) — mutually exclusive;
+`--vlmunr-python` (bpy interpreter).
 The LLM connection is wired through `VLMUNR_OPENAI_*` env vars (set by the CLI
 from the flags), which `hsm_core.vlm.gpt.Session` reads at construction — so every
 `create_session()` site across the pipeline picks them up without parameter
@@ -86,47 +99,75 @@ absent.
 
 ## Filename scheme
 
-Written under `<scene-dir>/renderings/`:
+Written under `<scene-dir>/renderings/`. Each config renders one RGBA transparent
+master (env-map-lit, transparent film), then alpha-composites every requested
+background color over it via PIL (bpa's two-stage recipe). `fit_ratio=1` (tight-
+fit) is always used.
 
-- **Transparent master** (per resolution/focal/camera/HDRI):
-  `render_{res}_{focal}_{pitch}_{yaw}_{hdri}.png`
-  e.g. `render_512_50_0_0_city.png`
-- **Composited per background gray** (master alpha-composited over an RGB gray):
-  `render_{res}_{focal}_{r}_{g}_{b}_{pitch}_{yaw}_{hdri}.png`
-  e.g. `render_512_50_128_128_128_0_0_city.png`
+- **Transparent master** (per resolution/focal/pitch/yaw/HDRI):
+  `render_res-{R}_focal-{F}_pitch-{P}_yaw-{Y}_env-{ENV}.png`
+  e.g. `render_res-512_focal-50_pitch-0_yaw-0_env-city.png`
+- **Composited per background** (master alpha-composited over an RGB color):
+  `render_res-{R}_focal-{F}_pitch-{P}_yaw-{Y}_env-{ENV}_bg-{r}-{g}-{b}.png`
+  e.g. `render_res-512_focal-50_pitch-0_yaw-0_env-city_bg-255-255-255.png`
 
-Variant scene-state files are written next to the source as
-`<stem>_<variant>.json`, e.g. `hsm_scene_state_variant_half.json`.
+The filename pitch value is always the literal `rotation[0]` passed to
+`render_perspective` (`pitch 0` == top-down), so names are consistent across
+methods regardless of any per-method convention.
 
-## Factor levels (`vlmunr_config.py`)
+## Factor levels + sweeps (`vlmunr_config.py`)
 
-Levels match paper Table 1 exactly.
+Levels match paper Table 1.
 
 | Factor | Levels | Baseline |
 |--------|--------|----------|
 | `RESOLUTIONS` | 196, 224, 256, 336, 384, 448, 512, 768, 1024 (9) | 512 |
 | `FOCAL_LENGTHS` | 16, 24, 35, 50, 85, 100, 200 (7) | 50 |
-| `BACKGROUND_GRAYS` | 0, 65, 128, 186, 204, 255 (6) | (128,128,128) |
-| `BACKGROUND_CHROMATIC` | (255,0,0), (0,255,0), (0,0,255) (3) | — |
-| `FLOOR_TEXTURE_BACKGROUND` | `"floor_texture"` sentinel — documented as a Table 1 level but **NOT rendered** by this harness (textured-floor compositing is out of scope; recorded for completeness). | — |
+| `BACKGROUNDS` | (0,0,0),(65,65,65),**(118,118,118)**,(128,128,128),(186,186,186),(204,204,204),(255,255,255),(255,0,0),(0,255,0),(0,0,255) (10) | (255,255,255) white |
 | `HDRIS` | city, courtyard, forest, interior, night, studio, sunrise, sunset (8) | city |
 | `PITCHES` | 0, 15, 30, 45, 60, 75, 90 (7) | 0 |
 | `YAWS` | 0, 45, 90, 135, 180, 225, 270, 315 (8, 45° steps) | 0 |
-| `BASELINE_YAW_PITCH` | 45 — pitch fixed at 45 when sweeping yaw alone | — |
+| `BASELINE_YAW_PITCH` | 45 — pitch fixed at 45 when sweeping yaw alone (a top-down view is rotation-invariant about yaw) | — |
 
-`phase_levels(phase)` returns a **dict** with keys
-`{resolution, focal_length, background, hdri, pitch, yaw, vary, levels}`:
-- `1a` resolution sweep · `1b` background-gray sweep · `1b_chroma` chromatic-background
-  sweep (R/G/B, 3 levels) · `1c` HDRI sweep · `1d` focal-length sweep
-- `2` pitch × yaw camera-angle grid (7 × 8 = 56 poses, kept for backward compat)
-- `2_pitch` pitch sweep (7 levels) with **yaw fixed at 0** (`BASELINE_YAW`)
-- `2_yaw` yaw sweep (8 levels) with **pitch fixed at 45** (`BASELINE_YAW_PITCH`)
+- `single_render_config()` → the one `--render` config: baseline (white bg), 512,
+  50mm, pitch 0 (top-down), yaw 0, city.
+- `render_all_configs()` → the six `--render-all` sweeps, **deduped** per camera
+  config (res, focal, pitch, yaw, env): a config rendered by several sweeps is
+  rendered once as a transparent master and composited over the UNION of every
+  background color requested for it. The baseline config is touched by every
+  sweep + the bg sweep, so it collects all 10 backgrounds.
+  Sweeps: (1) resolution, (2) focal length, (3) pitch (yaw 0), (4) yaw (pitch
+  45), (5) env map, (6) background.
 
-`ALL_PHASES = [1a, 1b, 1b_chroma, 1c, 1d, 2, 2_pitch, 2_yaw]` (drives `--phase all`).
+A `RenderConfig` is one transparent master + its list of bg colors; its `key`
+property is the dedup identity.
 
-Camera framing uses `Renderer.render_perspective(out, center, radius, rotation=(pitch,0,yaw), …)`
-with the bounding sphere computed from the imported meshes. Changing the HDRI re-`initialize()`s
-the world.
+## Dollhouse room shell
+
+A generated scene is more than furniture: it has a floor, walls, and often doors
+and windows; object placements are defined relative to that shell. The renderer
+keeps each method's architectural geometry (floor footprint, walls, door/window
+openings) rather than rendering objects in a void. Opaque walls would occlude the
+interior during oblique pitch/yaw sweeps, so walls use the **dollhouse
+convention**: a backface-culling material makes the camera-facing (near) wall
+faces transparent (driven by the surface normal via Blender's `Backfacing`
+geometry node), while far walls — and the doors/windows on them — stay visible.
+At top-down (pitch 0) walls are edge-on and negligible; as pitch increases the
+near walls fall away automatically. Doors and windows are real cutout openings in
+the wall quad mesh, so they are retained throughout (part of the wall geometry,
+not discarded).
+
+The PURE geometry lives in `vlmunr_render.py`:
+- `parse_shell_spec(state, fmt)` → `{floor: [(x,y)...], walls: [{a,b,height,openings}]}`.
+  stk uses `scene.arch.elements` (Floor polygon + Wall holes with precomputed
+  boxes); hsm uses `room_vertices` + `door_location` + `window_location` with the
+  HSM default door/window dimensions.
+- `wall_quad_tiles(a, b, height, openings, centroid)` tiles a wall edge into quads
+  that avoid every opening, wound outward (away from the floor centroid).
+- `shell_wall_quads` / `shell_floor_verts3d` produce the final mesh verts.
+
+`vlmunr_shell.build_shell(bpy, spec)` assembles the floor (opaque) + walls
+(backface-culling material) into the Blender scene.
 
 ## Content variants (`vlmunr_variants.py`)
 
@@ -229,22 +270,31 @@ id**; both dict and list forms are handled.
 ## VERIFICATION STATUS
 
 **Verified (this environment):**
-- Unit suite: **71 passed** (`pytest tests/ -q`). Covers exact filename strings;
-  paper-Table-1 factor-level counts (RES 9, FOCAL 7, PITCH 7, YAW 8, GRAYS 6, CHROMA 3)
-  and exact values; the new phases (`1b_chroma` → 3 chromatic levels, `2_pitch` → yaw==0
-  with 7 levels, `2_yaw` → pitch==45 with 8 levels) plus preserved `phase_levels` dict
-  shape; removal+renumber on synthetic stk **and** hsm states (counts == `round(n/k)`,
+- Unit suite: **89 passed, 1 skipped** (`pytest tests/ -q`, vlmunr env). Covers
+  the new filename strings (`render_res-.._focal-.._pitch-.._yaw-.._env-..[_bg-..]`);
+  factor-level counts/values (RES 9, FOCAL 7, PITCH 7, YAW 8, BGS 10, HDRI 8);
+  the white baseline `single_render_config`; the deduped `render_all_configs`
+  (every sweep level present, baseline unions all 10 bgs, yaw sweep uses pitch
+  45, non-baseline configs white-only); the dollhouse shell PURE geometry
+  (`parse_shell_spec` for stk arch + hsm room_vertices/door/window,
+  `wall_quad_tiles` solid-wall + cutout-openings, outward winding, CCW floor);
+  removal+renumber on synthetic stk **and** hsm states (counts == `round(n/k)`,
   ≥ 1, contiguous ids, deterministic across seeds, dict & list `scene_objects`);
   worst-match graceful degradation; within/cross substitution intent recording
-  (`{object_id: mode}`) + degradation on both formats; layout scramble on both formats
-  (determinism, preserved count/ids, in-bounds, height + rotation/orientation unchanged,
-  arch-floor bounds with object-extent fallback); and **PURE** Y-up→Z-up position/rotation
-  conversion and the column-major 4×4 STK decode/encode round-trip against **known
-  inputs**.
-- **Synthetic bpy smoke render**: one config rendered on a primitive cube via
-  `vlmunr_bpa` (bpy 5.1.2), producing a non-empty PNG. Run in a subprocess inside the
-  test because bpa's fd-level `redirect_stdout` corrupts pytest's terminal writer
-  in-process.
+  + degradation on both formats; layout scramble on both formats; and the
+  column-major 4×4 STK decode/encode round-trip against **known inputs**.
+- **Synthetic bpy smoke renders** (bpy 5.1.2, subprocess): (a) one config on a
+  primitive cube via `vlmunr_bpa`; (b) `render_configs` on a synthetic hsm scene
+  building the dollhouse shell (floor + walls with a door & a window opening),
+  writing the transparent master + white composite for a top-down (pitch 0) and
+  an oblique (pitch 45) config — the oblique render shows ~35% transparent
+  pixels (near walls culled) vs ~5% top-down (only the openings), confirming the
+  backface-culling dollhouse behavior. Subprocess because bpa's fd-level
+  `redirect_stdout` corrupts pytest's terminal writer in-process.
+- `cli.py` arg validation: `--prompt`/`--path` mutual exclusion and
+  `--render`/`--render-all` mutual exclusion; render-subfolder discovery
+  (base/ + variant_* with state files, skipping empty variant dirs); bogus
+  `--vlmunr-python` surfaces a clear error.
 - `vlmunr_variants.py` CLI exercised end-to-end on a synthetic `hsm_scene_state.json`
   (all 9 variant files written: 3 removal, 3 worst-match, 2 substitution, 1 scramble).
 
@@ -256,4 +306,5 @@ id**; both dict and list forms are handled.
   OpenAI key. The hooks are structured and degrade gracefully (worst-match records
   `_vlmunr_worst_match`; within/cross substitution records `_vlmunr_substitution` with an
   `{object_id: mode}` intent map); the actual asset-swap paths are not exercised here.
-- **Full HSM scene generation** (`gen.sh`) — not run (requires HSM's model/API deps).
+- **Full HSM scene generation** (`gen.sh` / `cli.py --prompt`) — not run (requires HSM's
+  model/API deps + HSSD + CLIP + an OpenAI key).

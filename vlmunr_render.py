@@ -493,15 +493,18 @@ def _detect_format(state: dict) -> str:
 
 
 def load_scene_records(scene_dir: Path, hssd_dir: Optional[str]) -> List[dict]:
-    """Load placement records, preferring hsm_scene_state.json over stk."""
+    """Load placement records, preferring hsm_scene_state.json over stk.
+
+    Returns an EMPTY list (not an error) when a state file exists but holds no
+    objects — this is legitimate for shell-only renders (a scene whose objects
+    failed to resolve, or a synthetic shell test). Raises only when NO state file
+    is present at all."""
     hsm_path = scene_dir / "hsm_scene_state.json"
     stk_path = scene_dir / "stk_scene_state.json"
     if hsm_path.exists():
         with open(hsm_path) as f:
             state = json.load(f)
-        records = parse_hsm_scene(state)
-        if records:
-            return records
+        return parse_hsm_scene(state)
     if stk_path.exists():
         with open(stk_path) as f:
             state = json.load(f)
