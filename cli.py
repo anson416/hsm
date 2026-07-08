@@ -26,16 +26,38 @@ Output layout (per run), under ./outputs/ :
             scene.log                     run log
             visualizations/ ...           stage visualizations
             scene_motifs/ ...             motif GLBs/pickles
-            renderings/ ...               (only if you render this scene)
+            renderings/ ...               (only if --render / --render-all)
         variant_01_half/                  (only with --variants)
             hsm_scene_state.json          round(n/2) objects kept
-            renderings/ ...               (only if you render this variant)
+            renderings/ ...               (only if --render / --render-all)
         variant_02_biggest-only/
             hsm_scene_state.json          single largest object kept
         variant_03_scrambled/
             hsm_scene_state.json          positions + headings randomized in-room
         variant_04_worst-object/
             hsm_scene_state.json          assets swapped for worst-CLIP matches
+
+Rendering (--render / --render-all):
+  --render      one baseline render per scene subfolder (512px, white bg, 50mm,
+                pitch 0 = top-down, yaw 0, city env). Writes a transparent master
+                AND a white-composited PNG into <subfolder>/renderings/.
+  --render-all  the full six-factor sweep (resolution / focal / pitch / yaw /
+                env / background), deduped per camera config, into renderings/.
+  Either flag, with --prompt, renders the generated base (+ variants if
+                --variants). Either flag, with --path outputs/<stamp>/, skips
+                generation and renders base/ + every variant_* already present.
+  --prompt and --path are mutually exclusive; --render and --render-all are
+  mutually exclusive.
+
+  Filenames (under <subfolder>/renderings/):
+    transparent master : render_res-{R}_focal-{F}_pitch-{P}_yaw-{Y}_env-{ENV}.png
+    composited (bg)    : render_res-{R}_focal-{F}_pitch-{P}_yaw-{Y}_env-{ENV}_bg-{r}-{g}-{b}.png
+  Rendering always uses bpa's two-stage recipe (transparent master first, env-map
+  lit; then composite the bg color via PIL) and fit_ratio=1 (tight-fit). Walls
+  use the dollhouse convention: camera-facing wall faces are transparent (back-
+  face culling by surface normal); far walls + their door/window openings remain
+  visible. bpy lives only in the `vlmunr` conda env, so cli.py shells out to that
+  interpreter (override with --vlmunr-python / VLMUNR_PYTHON).
 
 Each variant subfolder holds a standalone scene-state file under the canonical
 name (hsm_scene_state.json / stk_scene_state.json) the renderer looks for, so
@@ -47,9 +69,12 @@ you can render any variant on its own:
 
 Usage:
     conda activate hsm
+    # generate (+ variants) and render the baseline of each scene:
     python cli.py --prompt "A cozy bedroom with a bed and nightstand." \
         --base-url https://api.openai.com/v1 --api-key sk-... \
-        --model gpt-4o-2024-08-06 --temperature 0.7 --variants
+        --model gpt-4o-2024-08-06 --temperature 0.7 --variants --render
+    # render the full sweep of an existing run (no generation):
+    python cli.py --path outputs/20260708-023434 --render-all
 
 ==============================================================================
 EXTERNAL RESOURCES THIS METHOD REQUIRES (and how to prepare them)
@@ -224,6 +249,7 @@ import asyncio
 import datetime
 import json
 import os
+import subprocess
 import sys
 import time
 import traceback
@@ -347,6 +373,10 @@ def _write_config_json(run_dir: Path, args: argparse.Namespace,
         },
         "variants": args.variants,
         "variant_seed": args.seed,
+        "render": args.render,
+        "render_all": args.render_all,
+        "render_mode": "all" if args.render_all else ("single" if args.render else None),
+        "vlmunr_python": _resolve_vlmunr_python(args),
         "hsm_config": OmegaConf.to_container(cfg, resolve=True),
         "run_dir": str(run_dir),
     }
@@ -433,6 +463,81 @@ def _generate_variants(run_dir: Path, seed: int, logger) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Rendering (delegated to the vlmunr env which has bpy)
+# ---------------------------------------------------------------------------
+
+# The default vlmunr interpreter (bpy lives only in the separate `vlmunr` env;
+# cli.py itself runs under `hsm` which has no bpy). Override with --vlmunr-python
+# or VLMUNR_PYTHON. The renderer is vlmunr_render.py with --mode single|all.
+DEFAULT_VLMUNR_PYTHON = "/Users/anson/miniforge3/envs/vlmunr/bin/python"
+
+STATE_FILENAMES = ("hsm_scene_state.json", "stk_scene_state.json")
+
+
+def _resolve_vlmunr_python(args: argparse.Namespace) -> str:
+    return (
+        args.vlmunr_python
+        or os.environ.get("VLMUNR_PYTHON")
+        or DEFAULT_VLMUNR_PYTHON
+    )
+
+
+def _discover_render_subdirs(run_dir: Path) -> list[Path]:
+    """Return the scene subdirs to render: base/ (if present) plus every
+    variant_*/ subfolder that holds a canonical scene-state file. Sorted for
+    deterministic ordering."""
+    found: list[Path] = []
+    base_dir = run_dir / "base"
+    if base_dir.is_dir() and any((base_dir / n).exists() for n in STATE_FILENAMES):
+        found.append(base_dir)
+    if run_dir.is_dir():
+        for child in sorted(run_dir.iterdir()):
+            if not child.is_dir() or not child.name.startswith("variant_"):
+                continue
+            if any((child / n).exists() for n in STATE_FILENAMES):
+                found.append(child)
+    return found
+
+
+def _render_subfolders(
+    run_dir: Path, mode: str, vlmunr_py: str,
+    hssd_dir: str | None, logger
+) -> int:
+    """Invoke vlmunr_render.py --mode <mode> on base/ + each variant_* subfolder
+    via the vlmunr python interpreter (bpy). Returns number of subfolders rendered."""
+    subdirs = _discover_render_subdirs(run_dir)
+    if not subdirs:
+        logger.warning("No renderable scene subfolders found under %s", run_dir)
+        print(f"(render: no base/ or variant_*/ with a scene-state file under {run_dir})")
+        return 0
+    if not Path(vlmunr_py).exists():
+        logger.error("vlmunr python not found at %s (override with --vlmunr-python)", vlmunr_py)
+        print(f"render: vlmunr python not found at {vlmunr_py} — "
+              f"install bpy there or pass --vlmunr-python /path/to/python")
+        return 0
+
+    rendered = 0
+    for sub in subdirs:
+        cmd = [vlmunr_py, str(PROJECT_ROOT / "vlmunr_render.py"),
+               "--scene-dir", str(sub), "--mode", mode]
+        if hssd_dir:
+            cmd += ["--hssd-dir", hssd_dir]
+        logger.info(f"Rendering {sub.name} (mode={mode}): {' '.join(cmd)}")
+        print(f"  render [{mode}] {sub.name} ...")
+        try:
+            subprocess.run(cmd, cwd=str(PROJECT_ROOT), check=True)
+            rendered += 1
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Render failed for {sub.name}: rc={e.returncode}")
+            print(f"  render FAILED for {sub.name} (rc={e.returncode}); continuing.")
+        except FileNotFoundError:
+            logger.error(f"vlmunr python executable missing: {vlmunr_py}")
+            print(f"  render: vlmunr python missing ({vlmunr_py}); aborting remaining.")
+            break
+    return rendered
+
+
+# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 
@@ -444,8 +549,12 @@ def _parse_args(argv=None) -> argparse.Namespace:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
-    p.add_argument("-p", "--prompt", required=True,
-                   help="Textual scene description (the LLM prompt).")
+    p.add_argument("-p", "--prompt", default=None,
+                   help="Textual scene description (the LLM prompt). Exactly one of "
+                        "--prompt / --path must be given.")
+    p.add_argument("--path", default=None,
+                   help="Path to an EXISTING run dir (outputs/<datetime>/) to render — "
+                        "no generation. Exactly one of --prompt / --path must be given.")
     p.add_argument("--base-url", default=None,
                    help="OpenAI-compatible base URL for the LLM (env: VLMUNR_OPENAI_BASE_URL). "
                         "Default official: https://api.openai.com/v1")
@@ -469,18 +578,62 @@ def _parse_args(argv=None) -> argparse.Namespace:
                         "scrambled / worst-object) from the base scene.")
     p.add_argument("--seed", type=int, default=42,
                    help="Seed for the deterministic variant generators (default 42).")
+    p.add_argument("--render", action="store_true",
+                   help="Render the scene(s) with Blender at the baseline config (512px, "
+                        "white bg, 50mm, pitch 0 / top-down, yaw 0, city env). With --prompt, "
+                        "renders the generated base (+ variants if --variants); with --path, "
+                        "renders base/ + every variant_* already present. Mutually exclusive "
+                        "with --render-all.")
+    p.add_argument("--render-all", action="store_true",
+                   help="Render the full six-factor sweep (resolution / focal / pitch / yaw / "
+                        "env / background) for each scene subfolder. Same source rules as "
+                        "--render. Mutually exclusive with --render.")
+    p.add_argument("--vlmunr-python", default=None,
+                   help="Path to the vlmunr-conda-env python (has bpy). Default: "
+                        f"{DEFAULT_VLMUNR_PYTHON} (env: VLMUNR_PYTHON).")
     return p.parse_args(argv)
+
+
+def _validate_args(args: argparse.Namespace) -> None:
+    """Enforce mutual exclusions: exactly one of --prompt/--path; not both render flags."""
+    if (args.prompt is None) == (args.path is None):
+        raise SystemExit("error: pass exactly one of --prompt (generate) or --path (render existing).")
+    if args.render and args.render_all:
+        raise SystemExit("error: --render and --render-all are mutually exclusive; pick one.")
+    if args.path and args.variants:
+        print("(note: --variants is a generation flag; ignored in --path (render-only) mode)")
 
 
 def main(argv=None) -> int:
     args = _parse_args(argv)
+    _validate_args(args)
 
+    logger = get_logger_safe()
+    render_mode = "all" if args.render_all else ("single" if args.render else None)
+    vlmunr_py = _resolve_vlmunr_python(args)
+
+    # ----- --path: render-only (no generation) ---------------------------------
+    if args.path is not None:
+        run_dir = Path(args.path).resolve()
+        if not run_dir.is_dir():
+            print(f"render: --path {run_dir} is not a directory")
+            return 1
+        print("HSM CLI — render-only mode (no generation)")
+        print(f"  run dir:  {run_dir}")
+        print(f"  mode:     {render_mode}")
+        if render_mode is None:
+            print("(--path given without --render/--render-all; nothing to do.)")
+            return 0
+        n = _render_subfolders(run_dir, render_mode, vlmunr_py, args.hssd_dir, logger)
+        print(f"Rendered {n} scene subfolder(s) under {run_dir}")
+        return 0
+
+    # ----- --prompt: generation (+ optional variants + optional render) -------
     # Apply data-path overrides BEFORE importing the pipeline (which transitively
     # imports the retrieval/support modules that read these paths).
     hssd_path, data_path = _apply_data_paths(args.hssd_dir, args.data_dir)
     _apply_llm_env(args)
 
-    logger = get_logger_safe()
     print("HSM CLI — scene generation started")
     print(f"Prompt:    {args.prompt}")
     print(f"Model:     {args.model or os.environ.get('VLMUNR_OPENAI_MODEL') or '(default gpt-5.1)'}")
@@ -528,6 +681,16 @@ def main(argv=None) -> int:
     print(f"  objects:   {n_objs}")
     if written_variants:
         print(f"  variants:  {len(written_variants)}")
+
+    if render_mode is not None:
+        print(f"Rendering scene(s) (mode={render_mode}) ...")
+        try:
+            n = _render_subfolders(run_dir, render_mode, vlmunr_py, args.hssd_dir, logger)
+            print(f"  rendered:  {n} scene subfolder(s)")
+        except Exception as e:
+            logger.error(f"Rendering failed: {e}")
+            logger.error(traceback.format_exc())
+            print(f"  rendering failed — scenes are still saved under {run_dir}")
     return 0
 
 
