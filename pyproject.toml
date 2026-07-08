@@ -1,0 +1,92 @@
+[build-system]
+requires = ["setuptools >= 61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hsm"
+version = "0.1.0"
+dependencies = [
+    # LLM / VLM session (hsm_core.vlm.gpt) + OpenAI-compatible endpoints
+    "openai>=2.0",
+    "python-dotenv>=1.0",
+    # Config + scene I/O
+    "omegaconf>=2.3",
+    "pyyaml>=6.0",
+    "compress_json>=1.1",
+    # Numerics + geometry
+    "numpy>=1.26",
+    "scipy>=1.13",
+    "shapely>=2.0",
+    "trimesh>=4.5",
+    "rtree>=1.2",
+    "networkx>=3.0",
+    # Retrieval / CLIP ranking (model_manager uses open_clip)
+    "open_clip_torch>=2.24",
+    "torch>=2.3",
+    "torchvision>=0.18",
+    "ftfy>=6.2",
+    "regex",
+    # Asset / model hosting
+    "huggingface_hub>=0.25",
+    "safetensors>=0.4",
+    "tqdm>=4.66",
+    "requests>=2.31",
+    # Rendering helpers used by the visualization path
+    "matplotlib>=3.8",
+    "pillow>=10.0",
+    "pyrender>=0.1.45",
+    # Misc utilities present in the codebase
+    "natsort>=8.4",
+    "rich>=13.0",
+    "pydantic>=2.0",
+]
+requires-python = ">=3.13,<3.14"
+description = "HSM — Hierarchical Scene Motifs: LLM-driven indoor 3D scene generation + VLM-unreliability audit rendering layer"
+readme = "README.md"
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "Natural Language :: English",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Multimedia :: Graphics :: 3D Modeling",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+[project.optional-dependencies]
+# Headless Blender (bpy) rendering layer (vlmunr_render.py / vlmunr_shell.py).
+# bpy ships its own bundled numpy/opencv and is NOT co-installable with the gen
+# stack's torch in one environment in practice, so it lives in the separate
+# `vlmunr` conda env. Install only when you need to render:
+#   pip install -e ".[render]"
+render = [
+    "bpy==5.1.2",
+    "pillow>=10.0",
+    "numpy>=1.26",
+    "scipy>=1.13",
+    "trimesh>=4.5",
+    "pyyaml>=6.0",
+]
+# Optional trimesh ray-tracing accelerator (speeds up support-region queries).
+accel = ["embreex"]
+dev = [
+    "pytest>=8.0",
+    "pytest-split",
+]
+
+[project.scripts]
+# End-to-end driver: generate (+ variants) and/or render from a text prompt or
+# an existing run dir. See `python cli.py --help`.
+hsm = "cli:main"
+
+[tool.setuptools]
+# hsm_core/ is a namespace-style dir (no __init__.py) used via sys.path; discover
+# packages automatically. Top-level scripts (cli, vlmunr_*) are installed as
+# modules so the `hsm` console script resolves.
+py-modules = ["cli", "vlmunr_bpa", "vlmunr_config", "vlmunr_render", "vlmunr_shell", "vlmunr_variants"]
+
+[tool.setuptools.packages.find]
+include = ["hsm_core*"]
+
+[tool.black]
+line-length = 119
