@@ -231,8 +231,7 @@ def composited_filename(
 #     from `a` along the edge, z = height.
 #
 # Coordinate mapping:
-#   stk arch point p = [-hsm_x, 0, hsm_z] (X negated on write). Undo + yup_to_zup:
-#     Blender (x,y) = (-p[0], -p[2]).
+#   stk arch point p = [hsm_x, hsm_z, 0]: Blender (x,y) = (p[0], -p[1]).
 #   hsm room_vertex (x,z) -> Blender (x,-z) directly.
 
 # Sentinel for an hsm-state scene with no architecture (objects in a void).
@@ -240,8 +239,8 @@ EMPTY_SHELL_SPEC = {"floor": [], "walls": []}
 
 
 def _arch_point_to_blender_xy(p) -> Tuple[float, float]:
-    """stk arch point [-hsm_x, 0, hsm_z] -> Blender XY (undo flip + yup_to_zup)."""
-    return (-float(p[0]), -float(p[2]))
+    """stk arch point [hsm_x, hsm_z, 0] -> Blender XY (x, -z)."""
+    return (float(p[0]), -float(p[1]))
 
 
 def _ensure_ccw_xy(
