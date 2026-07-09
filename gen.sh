@@ -4,19 +4,19 @@
 # Loops over a list of room prompts and calls HSM's main.py for each, writing
 # each scene under results/<name>/. HSM ALWAYS emits stk_scene_state.json.
 #
-# NOTE: hsm_scene_state.json (preferred by vlmunr_render.py because it carries
+# NOTE: hsm_scene_state.json (preferred by render.py because it carries
 # mesh_path + pose) is only emitted when the scene is saved with
 # save_scene_state=True. main.py does NOT expose this as a CLI flag; the
 # pipeline's final scene.save(...) calls use the default (False). To emit it,
 # patch the save() calls in hsm_core/scene/processing/scene_pipeline.py (or the
 # default in hsm_core/scene/core/manager.py:save) to pass save_scene_state=True.
-# See VLMUNR_INTEGRATION.md. The renderer falls back to stk_scene_state.json
-# (which needs an HSSD dir to resolve meshes) when hsm_scene_state.json is absent.
+# The renderer falls back to stk_scene_state.json (which needs an HSSD dir to
+# resolve meshes) when hsm_scene_state.json is absent.
 #
 # Usage: ./gen.sh
 set -euo pipefail
 
-PYTHON="${PYTHON:-/Users/anson/miniforge3/envs/vlmunr/bin/python}"
+PYTHON="${PYTHON:-/Users/anson/miniforge3/envs/hsm/bin/python}"
 RESULTS_DIR="${RESULTS_DIR:-results}"
 
 # name|prompt pairs

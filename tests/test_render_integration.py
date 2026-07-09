@@ -5,7 +5,7 @@ Covers:
   (a) filename builders produce exact strings,
   (b) removal + renumber on synthetic stk AND hsm scene states,
   (c) PURE Y-up->Z-up transform and column-major 4x4 decode against known inputs,
-  (d) a bpy SMOKE test rendering one config on a primitive cube via vlmunr_bpa.
+  (d) a bpy SMOKE test rendering one config on a primitive cube via blender_bpa.
 """
 
 import json
@@ -268,8 +268,8 @@ def test_worst_match_degrades_gracefully():
     # scene preserved, intent recorded
     objs, _ = var._scene_objects_as_list(new_state["scene_objects"])
     assert len(objs) == 4
-    assert all("_vlmunr_worst_match" in o for o in objs)
-    assert new_state["_vlmunr_worst_match"]["rank"] == 2
+    assert all("_worst_match" in o for o in objs)
+    assert new_state["_worst_match"]["rank"] == 2
 
 
 # ===========================================================================
@@ -440,8 +440,8 @@ def test_worst_match_flag_in_signatures():
     """worst_match is threaded through the public retrieval surface.
 
     Skipped when the full hsm_core.retrieval import chain is unavailable in this
-    env (it pulls in python-dotenv / torch / clip via hsm_core.vlm.gpt); the vlmunr
-    audit env has bpy but not all HSM deps. Run under the `hsm` conda env to exercise.
+    env (it pulls in python-dotenv / torch / clip via hsm_core.vlm.gpt); a
+    render-only env may have bpy but not all HSM deps. Run under the `hsm` conda env to exercise.
     """
     import inspect
     try:
@@ -725,8 +725,8 @@ def test_substitution_hsm_intent_and_degradation(variant, mode, as_dict):
     assert report["intent"] == {str(i): mode for i in range(4)}
     objs, _ = var._scene_objects_as_list(new_state["scene_objects"])
     assert len(objs) == 4
-    assert all(o["_vlmunr_substitution"]["mode"] == mode for o in objs)
-    assert new_state["_vlmunr_substitution"]["mode"] == mode
+    assert all(o["_substitution"]["mode"] == mode for o in objs)
+    assert new_state["_substitution"]["mode"] == mode
 
 
 @pytest.mark.parametrize("variant,mode", list(var.SUBST_MODES.items()))
@@ -737,7 +737,7 @@ def test_substitution_stk_intent_and_degradation(variant, mode):
     assert report["applied"] == 0
     assert report["available"] is False
     assert report["intent"] == {str(i): mode for i in range(3)}
-    assert all("_vlmunr_substitution" in o for o in new_state["scene"]["object"])
+    assert all("_substitution" in o for o in new_state["scene"]["object"])
 
 
 def test_substitution_bad_mode():
@@ -770,7 +770,7 @@ sys.exit(0 if (ok and os.path.exists(out) and os.path.getsize(out) > 0) else 1)
 
 
 def test_bpy_smoke_render_cube(tmp_path):
-    """Render one config on a primitive cube via vlmunr_bpa.
+    """Render one config on a primitive cube via blender_bpa.
 
     bpa performs fd-level stdout redirection (redirect_stdout), which corrupts
     pytest's terminal writer if run in-process; we therefore drive the render in

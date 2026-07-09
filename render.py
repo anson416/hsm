@@ -594,7 +594,7 @@ def build_blender_scene(records: List[dict], shell_spec: dict) -> Tuple[object, 
             f"[render] WARNING: {len(missing)} mesh(es) missing/unresolved; skipped."
         )
 
-    # VLMUNR dollhouse shell (floor + walls with door/window openings).
+    # Dollhouse shell (floor + walls with door/window openings).
     try:
         _vs.build_shell(bpa.bpy, shell_spec)
     except Exception as _e:

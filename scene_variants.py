@@ -41,7 +41,7 @@ import render as rnd
 # ---------------------------------------------------------------------------
 
 REMOVAL_DIVISORS = {"variant_half": 2, "variant_quarter": 4, "variant_eighth": 8}
-WORST_MATCH_RANKS = {}  # VLMUNR: alt_* dropped per methodology (keep within/cross only)
+WORST_MATCH_RANKS = {}  # alt_* dropped per methodology (keep within/cross only)
 # Substitution modes: same category (different instance) vs different category.
 SUBST_MODES = {"variant_subst_within": "within", "variant_subst_cross": "cross"}
 
@@ -367,7 +367,7 @@ def scramble_layout(state: dict, seed: int, scramble_rotation: bool = False) -> 
 # lightweight Obj proxies built from the saved state. When the HSSD DB / CLIP /
 # OpenAI key are absent (the audit environment), retrieval assigns no new meshes
 # and we degrade gracefully: the original assets are kept and the intent is
-# recorded under `_vlmunr_worst_match` so downstream tooling can see the request.
+# recorded under `_worst_match` so downstream tooling can see the request.
 
 
 def _dims_to_half_size(dims) -> Optional[List[float]]:
@@ -466,7 +466,7 @@ def apply_worst_match(state: dict, rank: int, seed: int) -> Tuple[dict, dict]:
 
     Returns (new_state, report). Degrades gracefully: when retrieval is
     unavailable (no HSSD DB / CLIP / OpenAI), the original assets are kept and
-    the intent is recorded under `_vlmunr_worst_match` on the state (and
+    the intent is recorded under `_worst_match` on the state (and
     per-object) so downstream tooling can see what was requested. Nothing crashes.
     """
     state = copy.deepcopy(state)
@@ -486,7 +486,7 @@ def apply_worst_match(state: dict, rank: int, seed: int) -> Tuple[dict, dict]:
             orig_path = obj.get("mesh_path")
             new_path = new_paths[i] if (new_paths and i < len(new_paths)) else None
             applied = new_path is not None and new_path != orig_path
-            obj["_vlmunr_worst_match"] = {
+            obj["_worst_match"] = {
                 "rank": rank,
                 "query": obj.get("name") or obj.get("obj_type") or "",
                 "original_mesh_path": orig_path,
@@ -510,7 +510,7 @@ def apply_worst_match(state: dict, rank: int, seed: int) -> Tuple[dict, dict]:
             orig_model = obj.get("modelId", "")
             new_path = new_paths[i] if (new_paths and i < len(new_paths)) else None
             applied = new_path is not None
-            obj["_vlmunr_worst_match"] = {
+            obj["_worst_match"] = {
                 "rank": rank,
                 "modelId": orig_model,
                 "new_mesh_path": new_path if applied else None,
@@ -524,7 +524,7 @@ def apply_worst_match(state: dict, rank: int, seed: int) -> Tuple[dict, dict]:
                 report["applied"] += 1
 
     report["available"] = report["applied"] > 0
-    state["_vlmunr_worst_match"] = report
+    state["_worst_match"] = report
     return state, report
 
 
@@ -559,7 +559,7 @@ def apply_substitution(state: dict, mode: str, seed: int) -> Tuple[dict, dict]:
 
     Returns (new_state, report). Degrades gracefully: when the retrieval hook is
     unavailable, the original asset is kept and the intent is recorded as an
-    {object_id: mode} map under `_vlmunr_substitution` on the state (and per-object)
+    {object_id: mode} map under `_substitution` on the state (and per-object)
     so downstream tooling can see what was requested. Handles both state formats.
     """
     if mode not in ("within", "cross"):
@@ -586,7 +586,7 @@ def apply_substitution(state: dict, mode: str, seed: int) -> Tuple[dict, dict]:
             query = obj.get("name") or obj.get("obj_type") or ""
             new_id = _try_substitution_lookup(query, mode, seed)
             intent[obj_id] = mode
-            obj["_vlmunr_substitution"] = {"mode": mode, "query": query, "applied": new_id is not None}
+            obj["_substitution"] = {"mode": mode, "query": query, "applied": new_id is not None}
             if new_id is not None:
                 report["applied"] += 1
             rebuilt.append(obj)
@@ -601,12 +601,12 @@ def apply_substitution(state: dict, mode: str, seed: int) -> Tuple[dict, dict]:
             model_id = obj.get("modelId", "")
             new_id = _try_substitution_lookup(model_id, mode, seed)
             intent[obj_id] = mode
-            obj["_vlmunr_substitution"] = {"mode": mode, "modelId": model_id, "applied": new_id is not None}
+            obj["_substitution"] = {"mode": mode, "modelId": model_id, "applied": new_id is not None}
             if new_id is not None:
                 report["applied"] += 1
 
     report["available"] = report["applied"] > 0
-    state["_vlmunr_substitution"] = report
+    state["_substitution"] = report
     return state, report
 
 

@@ -54,10 +54,11 @@ classifiers = [
 ]
 
 [project.optional-dependencies]
-# Headless Blender (bpy) rendering layer (vlmunr_render.py / vlmunr_shell.py).
-# bpy ships its own bundled numpy/opencv and is NOT co-installable with the gen
-# stack's torch in one environment in practice, so it lives in the separate
-# `vlmunr` conda env. Install only when you need to render:
+# Headless Blender (bpy) rendering layer (render.py / render_shell.py).
+# bpy 5.1.2 co-installs with the gen stack's torch in the SAME `hsm` env
+# (verified: torch 2.13 + bpy 5.1.2 import together), so there is no separate
+# render env — generation and rendering both run here. Kept as an extra so a
+# generate-only install stays light:
 #   pip install -e ".[render]"
 render = [
     "bpy==5.1.2",
@@ -81,7 +82,7 @@ hsm = "cli:main"
 
 [tool.setuptools]
 # hsm_core/ is a namespace-style dir (no __init__.py) used via sys.path; discover
-# packages automatically. Top-level scripts (cli, vlmunr_*) are installed as
+# packages automatically. Top-level scripts (cli, render*) are installed as
 # modules so the `hsm` console script resolves.
 py-modules = ["cli", "blender_bpa", "render_config", "render", "render_shell", "scene_variants"]
 

@@ -4,6 +4,9 @@
 # Renders every scene subfolder (one holding a scene-state file) under RUN_DIR.
 # This mirrors cli.py's --path mode: it does NOT generate, only renders.
 #
+# Rendering runs under the `hsm` conda env, which now carries bpy (install via
+# the [render] extra). There is no separate render env.
+#
 # Usage:
 #   ./run.sh                         # --mode all (full six-factor sweep) over <RUN_DIR>/*
 #   ./run.sh single                  # --mode single (baseline only)
@@ -15,7 +18,7 @@
 #   python cli.py --path outputs/20260708-023434 --render-all
 set -euo pipefail
 
-PYTHON="${PYTHON:-/Users/anson/miniforge3/envs/vlmunr/bin/python}"
+PYTHON="${PYTHON:-/Users/anson/miniforge3/envs/hsm/bin/python}"
 RUN_DIR="${RUN_DIR:-outputs}"
 MODE="${1:-all}"
 # Optional: export HSSD_DIR=/path/to/hssd-models  (needed for stk-only scenes)
@@ -28,7 +31,7 @@ render_one() {
   if [[ -f "$d/hsm_scene_state.json" || -f "$d/stk_scene_state.json" ]]; then
     found=1
     echo "[run] === $d (mode=$MODE) ==="
-    "$PYTHON" vlmunr_render.py --scene-dir "$d" --mode "$MODE"
+    "$PYTHON" render.py --scene-dir "$d" --mode "$MODE"
   fi
 }
 
