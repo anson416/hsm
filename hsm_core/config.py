@@ -10,7 +10,9 @@ DATA_PATH = PROJECT_ROOT / "data"
 HSSD_PATH = DATA_PATH / "hssd-models"
 
 GLOBAL_LOGGING_LEVEL_THRESHOLD = logging.DEBUG
-LOGGING_LEVEL_TERMINAL = logging.FATAL
+# Terminal handler prints INFO by default so progress is visible on the console.
+# Override per-run with the `--log-level` CLI flag (exported as HSM_LOG_LEVEL).
+LOGGING_LEVEL_TERMINAL = logging.INFO
 LOGGING_LEVEL_FILE = logging.INFO
 
 # if __name__ == "__main__":

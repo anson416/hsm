@@ -620,6 +620,12 @@ def _parse_args(argv=None) -> argparse.Namespace:
         help="Seed for the deterministic variant generators (default 42).",
     )
     p.add_argument(
+        "--log-level",
+        default="info",
+        help="Console log verbosity: debug/info/warning/error (default info). "
+        "The full log is always written to scene.log at info.",
+    )
+    p.add_argument(
         "--render",
         action="store_true",
         help="Render the scene(s) with Blender at the baseline config (512px, "
@@ -657,6 +663,10 @@ def _validate_args(args: argparse.Namespace) -> None:
 def main(argv=None) -> int:
     args = _parse_args(argv)
     _validate_args(args)
+
+    # Export the console log level so setup_logging() (called deep inside the
+    # pipeline) reads it via HSM_LOG_LEVEL. The file log always stays at info.
+    os.environ["HSM_LOG_LEVEL"] = args.log_level.lower()
 
     logger = get_logger_safe()
     render_mode = "all" if args.render_all else ("single" if args.render else None)

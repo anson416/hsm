@@ -19,8 +19,33 @@ Usage:
 from hsm_core.config import GLOBAL_LOGGING_LEVEL_THRESHOLD, LOGGING_LEVEL_TERMINAL, LOGGING_LEVEL_FILE
 
 import logging
+import os
 import sys
 from pathlib import Path
+
+# Map string names (from --log-level / HSM_LOG_LEVEL) to logging constants.
+_LEVEL_NAMES = {
+    "debug": logging.DEBUG,
+    "info": logging.INFO,
+    "warning": logging.WARNING,
+    "warn": logging.WARNING,
+    "error": logging.ERROR,
+    "critical": logging.CRITICAL,
+    "fatal": logging.CRITICAL,
+}
+
+
+def _resolve_terminal_level(default: int) -> int:
+    """Resolve the terminal handler level from HSM_LOG_LEVEL, falling back to default."""
+    raw = os.environ.get("HSM_LOG_LEVEL")
+    if not raw:
+        return default
+    resolved = _LEVEL_NAMES.get(raw.strip().lower())
+    if resolved is None:
+        raise ValueError(
+            f"Unknown log level '{raw}'. Choose from: {', '.join(sorted(_LEVEL_NAMES))}."
+        )
+    return resolved
 
 class HSMFormatter(logging.Formatter):
     def format(self, record):
@@ -65,9 +90,10 @@ def setup_logging(output_dir: Path) -> logging.Logger:
     file_handler.setLevel(LOGGING_LEVEL_FILE)
     file_handler.setFormatter(formatter)
 
-    # Terminal handler
+    # Terminal handler — level can be overridden per-run via HSM_LOG_LEVEL
+    # (set by cli.py's --log-level flag), otherwise uses the config default.
     console_handler = logging.StreamHandler(sys.stdout)
-    console_handler.setLevel(LOGGING_LEVEL_TERMINAL)
+    console_handler.setLevel(_resolve_terminal_level(LOGGING_LEVEL_TERMINAL))
     console_handler.setFormatter(HSMFormatter('%(message)s'))
 
     # Configure main HSM logger - this will be the parent for all hsm_core loggers
