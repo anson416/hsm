@@ -56,15 +56,17 @@ Rendering (--render / --render-all):
   lit; then composite the bg color via PIL) and fit_ratio=1 (tight-fit). Walls
   use the dollhouse convention: camera-facing wall faces are transparent (back-
   face culling by surface normal); far walls + their door/window openings remain
-  visible. bpy lives only in the `vlmunr` conda env, so cli.py shells out to that
-  interpreter (override with --vlmunr-python / VLMUNR_PYTHON).
+  visible. Rendering runs IN-PROCESS under the `hsm` conda env, which carries
+  bpy (install via the `[render]` extra). There is no separate render env and no
+  subprocess: cli.py imports `render` lazily and calls render_configs() directly,
+  so bpy is only loaded when rendering actually runs.
 
 Each variant subfolder holds a standalone scene-state file under the canonical
 name (hsm_scene_state.json / stk_scene_state.json) the renderer looks for, so
 you can render any variant on its own:
 
-    conda activate vlmunr   # bpy lives here
-    python vlmunr_render.py --scene-dir outputs/<stamp>/variant_03_scrambled
+    conda activate hsm          # bpy lives here too
+    python render.py --scene-dir outputs/<stamp>/variant_03_scrambled
     # -> writes outputs/<stamp>/variant_03_scrambled/renderings/
 
 Usage:
@@ -198,10 +200,12 @@ HuggingFace/torch on first use (~600 MB) — needs internet the first time only.
 --------------------------------------------------------------------
 8. Blender (bpy)  — NOT needed for generation; only for rendering
 --------------------------------------------------------------------
-Generation itself does NOT use Blender. Rendering (vlmunr_render.py) needs `bpy`,
-which lives in the separate `vlmunr` conda env. This CLI only generates scenes +
-variants; rendering is a separate step. So you can run cli.py with just the `hsm`
-env.
+Generation itself does NOT use Blender. Rendering (render.py) needs `bpy`, which
+now lives in the SAME `hsm` conda env (install via the `[render]` extra:
+`pip install -e ".[render]"`). bpy + torch coexist in one env, so cli.py renders
+in-process — there is no separate render env. A generate-only install (without
+the `[render]` extra) skips bpy and just leaves the `--render*` flags inert until
+bpy is installed.
 
 ==============================================================================
 QUICKSTART (full manual prep from scratch)
@@ -234,8 +238,8 @@ QUICKSTART (full manual prep from scratch)
 ENVIRONMENT NOTES
 ==============================================================================
 - Run under the `hsm` conda env (it has openai, torch, omegaconf, trimesh, clip,
-  python-dotenv). The `vlmunr` env is for rendering only (bpy) and is missing
-  some HSM deps.
+  python-dotenv, AND bpy — install the `[render]` extra for rendering). There is
+  no separate render env; generation and rendering both run here.
 - If --hssd-dir / --data-dir are omitted, the defaults data/hssd-models and
   data/ (relative to this repo) are used, matching ./setup.sh's layout.
 
@@ -249,7 +253,6 @@ import asyncio
 import datetime
 import json
 import os
-import subprocess
 import sys
 import time
 import traceback
@@ -376,7 +379,6 @@ def _write_config_json(run_dir: Path, args: argparse.Namespace,
         "render": args.render,
         "render_all": args.render_all,
         "render_mode": "all" if args.render_all else ("single" if args.render else None),
-        "vlmunr_python": _resolve_vlmunr_python(args),
         "hsm_config": OmegaConf.to_container(cfg, resolve=True),
         "run_dir": str(run_dir),
     }
@@ -443,9 +445,9 @@ def _generate_variants(run_dir: Path, seed: int, logger) -> dict:
 
     Each variant is written to its own subfolder <run_dir>/<variant_name>/ with
     the canonical hsm_scene_state.json (or stk_scene_state.json) so it can be
-    rendered independently via vlmunr_render.py --scene-dir <that subfolder>.
+    rendered independently via render.py --scene-dir <that subfolder>.
     """
-    import vlmunr_variants as var
+    import scene_variants as var
 
     base_dir = run_dir / "base"
     hsm_path = base_dir / "hsm_scene_state.json"
@@ -463,23 +465,17 @@ def _generate_variants(run_dir: Path, seed: int, logger) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Rendering (delegated to the vlmunr env which has bpy)
+# Rendering (in-process — bpy lives in this same `hsm` env)
 # ---------------------------------------------------------------------------
 
-# The default vlmunr interpreter (bpy lives only in the separate `vlmunr` env;
-# cli.py itself runs under `hsm` which has no bpy). Override with --vlmunr-python
-# or VLMUNR_PYTHON. The renderer is vlmunr_render.py with --mode single|all.
-DEFAULT_VLMUNR_PYTHON = "/Users/anson/miniforge3/envs/vlmunr/bin/python"
+# Rendering runs in-process under the `hsm` conda env, which now carries bpy
+# (install via the `[render]` extra: `pip install -e ".[render]"`). bpy + torch
+# coexist in one env, so there is no separate render interpreter and no
+# subprocess: cli.py imports `render` lazily and calls render_configs() directly.
+# bpy itself is only imported when rendering actually runs (the generate-only
+# path never touches it).
 
 STATE_FILENAMES = ("hsm_scene_state.json", "stk_scene_state.json")
-
-
-def _resolve_vlmunr_python(args: argparse.Namespace) -> str:
-    return (
-        args.vlmunr_python
-        or os.environ.get("VLMUNR_PYTHON")
-        or DEFAULT_VLMUNR_PYTHON
-    )
 
 
 def _discover_render_subdirs(run_dir: Path) -> list[Path]:
@@ -499,41 +495,41 @@ def _discover_render_subdirs(run_dir: Path) -> list[Path]:
     return found
 
 
+def _render_configs_for_mode(mode: str) -> list:
+    """Build the deduped list of render configs for the given mode (single|all)."""
+    import render_config as rcfg
+
+    if mode == "all":
+        return rcfg.render_all_configs()
+    return [rcfg.single_render_config()]
+
+
 def _render_subfolders(
-    run_dir: Path, mode: str, vlmunr_py: str,
+    run_dir: Path, mode: str,
     hssd_dir: str | None, logger
 ) -> int:
-    """Invoke vlmunr_render.py --mode <mode> on base/ + each variant_* subfolder
-    via the vlmunr python interpreter (bpy). Returns number of subfolders rendered."""
+    """Render base/ + each variant_* subfolder in-process (bpy lives in the hsm
+    env). Returns the number of subfolders rendered successfully."""
+    import render as renderer
+
     subdirs = _discover_render_subdirs(run_dir)
     if not subdirs:
         logger.warning("No renderable scene subfolders found under %s", run_dir)
         print(f"(render: no base/ or variant_*/ with a scene-state file under {run_dir})")
         return 0
-    if not Path(vlmunr_py).exists():
-        logger.error("vlmunr python not found at %s (override with --vlmunr-python)", vlmunr_py)
-        print(f"render: vlmunr python not found at {vlmunr_py} — "
-              f"install bpy there or pass --vlmunr-python /path/to/python")
-        return 0
 
+    configs = _render_configs_for_mode(mode)
     rendered = 0
     for sub in subdirs:
-        cmd = [vlmunr_py, str(PROJECT_ROOT / "vlmunr_render.py"),
-               "--scene-dir", str(sub), "--mode", mode]
-        if hssd_dir:
-            cmd += ["--hssd-dir", hssd_dir]
-        logger.info(f"Rendering {sub.name} (mode={mode}): {' '.join(cmd)}")
+        logger.info(f"Rendering {sub.name} (mode={mode}): {len(configs)} config(s)")
         print(f"  render [{mode}] {sub.name} ...")
         try:
-            subprocess.run(cmd, cwd=str(PROJECT_ROOT), check=True)
+            renderer.render_configs(sub, configs, hssd_dir)
             rendered += 1
-        except subprocess.CalledProcessError as e:
-            logger.error(f"Render failed for {sub.name}: rc={e.returncode}")
-            print(f"  render FAILED for {sub.name} (rc={e.returncode}); continuing.")
-        except FileNotFoundError:
-            logger.error(f"vlmunr python executable missing: {vlmunr_py}")
-            print(f"  render: vlmunr python missing ({vlmunr_py}); aborting remaining.")
-            break
+        except Exception as e:
+            logger.error(f"Render failed for {sub.name}: {e}")
+            logger.error(traceback.format_exc())
+            print(f"  render FAILED for {sub.name} ({e}); continuing.")
     return rendered
 
 
@@ -588,9 +584,6 @@ def _parse_args(argv=None) -> argparse.Namespace:
                    help="Render the full six-factor sweep (resolution / focal / pitch / yaw / "
                         "env / background) for each scene subfolder. Same source rules as "
                         "--render. Mutually exclusive with --render.")
-    p.add_argument("--vlmunr-python", default=None,
-                   help="Path to the vlmunr-conda-env python (has bpy). Default: "
-                        f"{DEFAULT_VLMUNR_PYTHON} (env: VLMUNR_PYTHON).")
     return p.parse_args(argv)
 
 
@@ -610,7 +603,6 @@ def main(argv=None) -> int:
 
     logger = get_logger_safe()
     render_mode = "all" if args.render_all else ("single" if args.render else None)
-    vlmunr_py = _resolve_vlmunr_python(args)
 
     # ----- --path: render-only (no generation) ---------------------------------
     if args.path is not None:
@@ -624,7 +616,7 @@ def main(argv=None) -> int:
         if render_mode is None:
             print("(--path given without --render/--render-all; nothing to do.)")
             return 0
-        n = _render_subfolders(run_dir, render_mode, vlmunr_py, args.hssd_dir, logger)
+        n = _render_subfolders(run_dir, render_mode, args.hssd_dir, logger)
         print(f"Rendered {n} scene subfolder(s) under {run_dir}")
         return 0
 
@@ -685,7 +677,7 @@ def main(argv=None) -> int:
     if render_mode is not None:
         print(f"Rendering scene(s) (mode={render_mode}) ...")
         try:
-            n = _render_subfolders(run_dir, render_mode, vlmunr_py, args.hssd_dir, logger)
+            n = _render_subfolders(run_dir, render_mode, args.hssd_dir, logger)
             print(f"  rendered:  {n} scene subfolder(s)")
         except Exception as e:
             logger.error(f"Rendering failed: {e}")
