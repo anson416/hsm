@@ -1,5 +1,5 @@
 """
-vlmunr_render.py — Headless bpy renderer for HSM scenes (audit harness).
+render.py — Headless bpy renderer for HSM scenes (audit harness).
 
 Renders an HSM scene under a set of factor configurations. For each render
 config it first renders an RGBA *transparent master* (env-map-lit, transparent
@@ -35,7 +35,7 @@ from typing import List, Optional, Tuple
 
 import numpy as np
 
-import vlmunr_config as cfg
+import render_config as cfg
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -53,7 +53,7 @@ STK_FIX_MATRIX = np.array(
     dtype=float,
 )
 
-HDRI_DIR = Path(__file__).resolve().parent / "vlmunr_hdri"
+HDRI_DIR = Path(__file__).resolve().parent / "hdri"
 HDRI_STRENGTH = 1.0
 
 # Default architectural dimensions (HSM Y == Blender Z, vertical, meters).
@@ -74,7 +74,9 @@ FIT_RATIO = 1.0
 # ===========================================================================
 
 
-def yup_to_zup_position(position: Tuple[float, float, float]) -> Tuple[float, float, float]:
+def yup_to_zup_position(
+    position: Tuple[float, float, float],
+) -> Tuple[float, float, float]:
     """HSM Y-up (x,y,z) -> Blender Z-up (x,-z,y) so Blender Z == HSM Y."""
     x, y, z = position
     return (x, -z, y)
@@ -112,9 +114,7 @@ def encode_stk_transform(
     r = math.radians(rotation_deg)
     cos_r, sin_r = math.cos(r), math.sin(r)
     T = np.eye(4)
-    T[:3, :3] = np.array(
-        [[cos_r, 0.0, -sin_r], [0.0, 1.0, 0.0], [sin_r, 0.0, cos_r]]
-    )
+    T[:3, :3] = np.array([[cos_r, 0.0, -sin_r], [0.0, 1.0, 0.0], [sin_r, 0.0, cos_r]])
     T[:3, 3] = [-float(x), float(y), float(z)]
     M = STK_FIX_MATRIX @ T
     return M.reshape(-1, order="F").tolist()
@@ -244,7 +244,9 @@ def _arch_point_to_blender_xy(p) -> Tuple[float, float]:
     return (-float(p[0]), -float(p[2]))
 
 
-def _ensure_ccw_xy(verts: List[Tuple[float, float]]) -> List[Tuple[float, float, float]]:
+def _ensure_ccw_xy(
+    verts: List[Tuple[float, float]],
+) -> List[Tuple[float, float, float]]:
     """Return 3D floor verts (z=0) ordered CCW so the face normal points +Z."""
     pts = [(float(v[0]), float(v[1])) for v in verts]
     s = 0.0
@@ -283,7 +285,10 @@ def _hsm_openings_for_walls(
     walls = []
     for i in range(n):
         a = (float(floor_verts_hsm[i][0]), float(floor_verts_hsm[i][1]))
-        b = (float(floor_verts_hsm[(i + 1) % n][0]), float(floor_verts_hsm[(i + 1) % n][1]))
+        b = (
+            float(floor_verts_hsm[(i + 1) % n][0]),
+            float(floor_verts_hsm[(i + 1) % n][1]),
+        )
         walls.append({"a": a, "b": b, "height": DEFAULT_WALL_HEIGHT, "openings": []})
 
     # Door
@@ -291,14 +296,21 @@ def _hsm_openings_for_walls(
         dx, dz = float(door_location[0]), float(door_location[1])
         best = None
         for w in walls:
-            u, cx, cy = _project_point_on_segment(dx, dz, w["a"][0], w["a"][1], w["b"][0], w["b"][1])
+            u, cx, cy = _project_point_on_segment(
+                dx, dz, w["a"][0], w["a"][1], w["b"][0], w["b"][1]
+            )
             off = math.hypot(dx - cx, dz - cy)
             if best is None or off < best[0]:
                 best = (off, w, u)
         if best is not None and best[0] < 0.2:
             _, w, u = best
             w["openings"].append(
-                (u - DEFAULT_DOOR_WIDTH / 2, u + DEFAULT_DOOR_WIDTH / 2, 0.0, DEFAULT_DOOR_HEIGHT)
+                (
+                    u - DEFAULT_DOOR_WIDTH / 2,
+                    u + DEFAULT_DOOR_WIDTH / 2,
+                    0.0,
+                    DEFAULT_DOOR_HEIGHT,
+                )
             )
 
     # Windows
@@ -307,7 +319,9 @@ def _hsm_openings_for_walls(
             wx, wz = float(wloc[0]), float(wloc[1])
             best = None
             for w in walls:
-                u, cx, cy = _project_point_on_segment(wx, wz, w["a"][0], w["a"][1], w["b"][0], w["b"][1])
+                u, cx, cy = _project_point_on_segment(
+                    wx, wz, w["a"][0], w["a"][1], w["b"][0], w["b"][1]
+                )
                 off = math.hypot(wx - cx, wz - cy)
                 if best is None or off < best[0]:
                     best = (off, w, u)
@@ -353,7 +367,9 @@ def parse_shell_spec(state: dict, fmt: str) -> dict:
                 box = hole.get("box", {})
                 mn = box.get("min", [0, 0])
                 mx = box.get("max", [0, 0])
-                openings.append((float(mn[0]), float(mx[0]), float(mn[1]), float(mx[1])))
+                openings.append(
+                    (float(mn[0]), float(mx[0]), float(mn[1]), float(mx[1]))
+                )
             walls.append({"a": a, "b": b, "height": height, "openings": openings})
         return {"floor": floor, "walls": walls}
 
@@ -415,7 +431,9 @@ def wall_quad_tiles(
     if L <= 1e-9 or height <= 1e-9:
         return []
 
-    ups = sorted({0.0, L} | {float(o[0]) for o in openings} | {float(o[1]) for o in openings})
+    ups = sorted(
+        {0.0, L} | {float(o[0]) for o in openings} | {float(o[1]) for o in openings}
+    )
     nx, ny = wall_quad_normal_xy(a, b)
     mx, my = (ax + bx) / 2.0, (ay + by) / 2.0
     outward = (mx - centroid[0], my - centroid[1])
@@ -428,7 +446,8 @@ def wall_quad_tiles(
             continue
         u_mid = (u_lo + u_hi) / 2.0
         covering = [
-            o for o in openings
+            o
+            for o in openings
             if float(o[0]) <= u_mid + 1e-9 and u_mid - 1e-9 <= float(o[1])
         ]
         vps = sorted(
@@ -475,7 +494,9 @@ def shell_wall_quads(spec: dict) -> List[List[Tuple[float, float, float]]]:
     cent = shell_centroid(spec)
     out: List[List[Tuple[float, float, float]]] = []
     for w in spec.get("walls", []):
-        out.extend(wall_quad_tiles(w["a"], w["b"], w["height"], w.get("openings", []), cent))
+        out.extend(
+            wall_quad_tiles(w["a"], w["b"], w["height"], w.get("openings", []), cent)
+        )
     return out
 
 
@@ -550,8 +571,8 @@ def build_blender_scene(records: List[dict], shell_spec: dict) -> Tuple[object, 
     """Import all meshes into a fresh Blender scene, place them, and build the
     dollhouse room shell (floor + walls-with-openings, backface-culled).
     Returns (Renderer, (center, radius)) for camera framing."""
-    import vlmunr_bpa as bpa
-    import vlmunr_shell as _vs
+    import blender_bpa as bpa
+    import render_shell as _vs
 
     placed = 0
     missing = []
@@ -563,19 +584,21 @@ def build_blender_scene(records: List[dict], shell_spec: dict) -> Tuple[object, 
         try:
             obj = bpa.import_obj(mp)
         except Exception as _e:
-            print(f"[vlmunr_render] WARNING: import failed for {mp}: {_e}; skipped.")
+            print(f"[render] WARNING: import failed for {mp}: {_e}; skipped.")
             missing.append(mp)
             continue
         bpa.transform(obj, position=rec["position"], rotation=rec["rotation"])
         placed += 1
     if missing:
-        print(f"[vlmunr_render] WARNING: {len(missing)} mesh(es) missing/unresolved; skipped.")
+        print(
+            f"[render] WARNING: {len(missing)} mesh(es) missing/unresolved; skipped."
+        )
 
     # VLMUNR dollhouse shell (floor + walls with door/window openings).
     try:
         _vs.build_shell(bpa.bpy, shell_spec)
     except Exception as _e:
-        print(f"[vlmunr_render] WARNING: shell build failed: {_e}")
+        print(f"[render] WARNING: shell build failed: {_e}")
 
     renderer = bpa.Renderer()
     center, radius = renderer.compute_bounding_sphere()
@@ -594,7 +617,7 @@ def render_configs(
 
     Returns the list of all written PNG paths (transparent masters + composites).
     """
-    import vlmunr_bpa as bpa
+    import blender_bpa as bpa
 
     records = load_scene_records(scene_dir, hssd_dir)
     shell_spec = load_shell_spec(scene_dir)
@@ -618,7 +641,11 @@ def render_configs(
 
     for rc in configs:
         res, focal, pitch, yaw, hdri = (
-            rc.resolution, rc.focal_length, rc.pitch, rc.yaw, rc.hdri
+            rc.resolution,
+            rc.focal_length,
+            rc.pitch,
+            rc.yaw,
+            rc.hdri,
         )
         ensure_world(hdri)
         master = out_dir / transparent_filename(res, focal, pitch, yaw, hdri)
@@ -630,7 +657,7 @@ def render_configs(
             resolution=res,
             focal_length=focal,
             fit_ratio=FIT_RATIO,  # tight-fit per audit spec
-            background=None,      # transparent master
+            background=None,  # transparent master
         )
         outputs.append(str(master))
         for bg in rc.backgrounds:
@@ -647,20 +674,37 @@ def render_configs(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Render HSM scenes for the VLM audit harness.")
-    parser.add_argument("--scene-dir", required=True, type=Path,
-                        help="Directory containing hsm_scene_state.json and/or stk_scene_state.json")
-    parser.add_argument("--mode", default=cfg.SINGLE_MODE, choices=cfg.ALL_MODES,
-                        help="single = one baseline render; all = the six factor sweeps (deduped)")
-    parser.add_argument("--hssd-dir", default=os.environ.get("HSSD_DIR"),
-                        help="HSSD models root (for stk fallback mesh resolution)")
+    parser = argparse.ArgumentParser(
+        description="Render HSM scenes for the VLM audit harness."
+    )
+    parser.add_argument(
+        "--scene-dir",
+        required=True,
+        type=Path,
+        help="Directory containing hsm_scene_state.json and/or stk_scene_state.json",
+    )
+    parser.add_argument(
+        "--mode",
+        default=cfg.SINGLE_MODE,
+        choices=cfg.ALL_MODES,
+        help="single = one baseline render; all = the six factor sweeps (deduped)",
+    )
+    parser.add_argument(
+        "--hssd-dir",
+        default=os.environ.get("HSSD_DIR"),
+        help="HSSD models root (for stk fallback mesh resolution)",
+    )
     args = parser.parse_args()
 
     configs = (
-        cfg.render_all_configs() if args.mode == cfg.ALL_MODE else [cfg.single_render_config()]
+        cfg.render_all_configs()
+        if args.mode == cfg.ALL_MODE
+        else [cfg.single_render_config()]
     )
     outs = render_configs(args.scene_dir, configs, args.hssd_dir)
-    print(f"[vlmunr_render] {args.mode}: wrote {len(outs)} file(s) under {args.scene_dir}/renderings/")
+    print(
+        f"[render] {args.mode}: wrote {len(outs)} file(s) under {args.scene_dir}/renderings/"
+    )
 
 
 if __name__ == "__main__":

@@ -1,14 +1,14 @@
 """
-vlmunr_config.py — Render-factor levels + sweep definitions for the VLM-unreliability
+render_config.py — Render-factor levels + sweep definitions for the VLM-unreliability
 audit harness.
 
-Self-contained (no external `vlmunr` import). Defines the resolution / focal-length /
+Self-contained (no external import). Defines the resolution / focal-length /
 background / HDRI / camera-angle sweeps, the single-reference baseline, and producers
 that turn a request (`--render` single config, or `--render-all` six sweeps) into a
 DEDUPED list of render configs. Each render config is one transparent master to render
 plus the list of background colors to composite over it.
 
-Filename contract (see vlmunr_render.py):
+Filename contract (see render.py):
   transparent master : render_res-{R}_focal-{F}_pitch-{P}_yaw-{Y}_env-{ENV}.png
   composited (bg)   : render_res-{R}_focal-{F}_pitch-{P}_yaw-{Y}_env-{ENV}_bg-{r}-{g}-{b}.png
 """

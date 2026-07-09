@@ -83,7 +83,7 @@ hsm = "cli:main"
 # hsm_core/ is a namespace-style dir (no __init__.py) used via sys.path; discover
 # packages automatically. Top-level scripts (cli, vlmunr_*) are installed as
 # modules so the `hsm` console script resolves.
-py-modules = ["cli", "vlmunr_bpa", "vlmunr_config", "vlmunr_render", "vlmunr_shell", "vlmunr_variants"]
+py-modules = ["cli", "blender_bpa", "render_config", "render", "render_shell", "scene_variants"]
 
 [tool.setuptools.packages.find]
 include = ["hsm_core*"]

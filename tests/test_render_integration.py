@@ -20,9 +20,9 @@ import pytest
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-import vlmunr_config as cfg
-import vlmunr_render as rnd
-import vlmunr_variants as var
+import render_config as cfg
+import render as rnd
+import scene_variants as var
 
 
 # ---------------------------------------------------------------------------
@@ -752,7 +752,7 @@ def test_substitution_bad_mode():
 SMOKE_SCRIPT = r'''
 import sys, os
 sys.path.insert(0, {root!r})
-import vlmunr_bpa as bpa
+import blender_bpa as bpa
 out = {out!r}
 bpa.clear()
 cube = bpa.Builder.new_cube("SmokeCube")
@@ -803,7 +803,7 @@ state = {{
 os.makedirs(scene_dir, exist_ok=True)
 with open(os.path.join(scene_dir, "hsm_scene_state.json"), "w") as f:
     json.dump(state, f)
-import vlmunr_render as r, vlmunr_config as c
+import render as r, render_config as c
 # baseline single config (top-down) + one oblique, to exercise shell + culling.
 rcs = [
     c.RenderConfig(128, 50, 0, 0, "city", [(255, 255, 255)]),     # top-down

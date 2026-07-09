@@ -1,5 +1,5 @@
 """
-vlmunr_variants.py — Content-variant generators for the VLM audit harness.
+scene_variants.py — Content-variant generators for the VLM audit harness.
 
 Two families of variants, operating on whichever scene-state file exists:
 
@@ -34,7 +34,7 @@ import random
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-import vlmunr_render as rnd
+import render as rnd
 
 # ---------------------------------------------------------------------------
 # Format detection
@@ -709,7 +709,7 @@ def generate_named_variants(
       ``scene_dir`` — the original flat-source behavior the tests use).
     - Each variant is written under its own subfolder named after the variant,
       using the canonical state filename (``hsm_scene_state.json`` /
-      ``stk_scene_state.json``) so ``vlmunr_render.py --scene-dir <that
+      ``stk_scene_state.json``) so ``render.py --scene-dir <that
       subfolder>`` resolves it and writes ``renderings/`` next to it.
     - A freshly loaded copy of the base state is used per variant so each is an
       independent fork (never compounds on another).
@@ -746,7 +746,7 @@ def main() -> None:
 
     written = generate_all_variants(args.scene_dir, args.seed)
     for variant, path in written.items():
-        print(f"[vlmunr_variants] {variant} -> {path}")
+        print(f"[scene_variants] {variant} -> {path}")
 
 
 if __name__ == "__main__":

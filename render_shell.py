@@ -1,4 +1,4 @@
-"""vlmunr_shell.py — dollhouse room-shell builder for the audit renderer.
+"""render_shell.py — dollhouse room-shell builder for the audit renderer.
 
 Builds a neutral floor (opaque) + walls with door/window openings cut out, and
 applies a backface-culling material to the walls so the camera-facing (near)
@@ -18,7 +18,7 @@ makes a face transparent when viewed from its front (normal toward camera) and
 opaque when viewed from its back.
 
 The PURE geometry (wall-quad tiling, arch parsing, outward-normal winding) lives
-in vlmunr_render.py so it is unit-testable without bpy. This module only does
+in render.py so it is unit-testable without bpy. This module only does
 the bpy mesh + material assembly.
 """
 
@@ -42,7 +42,7 @@ def _node(nodes, type_name, label):
     return n
 
 
-def _floor_material(bpy, name="vlmunr_floor_mat"):
+def _floor_material(bpy, name="hsm_floor_mat"):
     """Plain opaque neutral material for the floor (NO backface culling — the
     floor must stay opaque when viewed from above)."""
     m = _get_or_create_material(bpy, name)
@@ -62,10 +62,10 @@ def _floor_material(bpy, name="vlmunr_floor_mat"):
     return m
 
 
-def _wall_backface_material(bpy, name="vlmunr_wall_bfc_mat"):
+def _wall_backface_material(bpy, name="hsm_wall_bfc_mat"):
     """Neutral Principled BSDF mixed with transparent by the `Backfacing` geometry
     node: front faces (normal toward camera) -> transparent; back faces -> opaque.
-    Mirrors vlmunr_bpa.Builder.add_material(backface_culling=True) but shared."""
+    Mirrors blender_bpa.Builder.add_material(backface_culling=True) but shared."""
     m = _get_or_create_material(bpy, name)
     nodes = m.node_tree.nodes
     links = m.node_tree.links
@@ -97,18 +97,18 @@ def _add_mesh(bpy, name, verts, faces, material):
 
 
 def build_shell(bpy, spec: dict):
-    """Build floor + walls from a ShellSpec dict (see vlmunr_render.parse_shell_spec).
+    """Build floor + walls from a ShellSpec dict (see render.parse_shell_spec).
 
     Floor -> plain opaque neutral material. Walls -> flat quads with door/window
     openings cut out, carrying the backface-culling material (near walls
     transparent per-normal, far walls + their openings visible).
     """
-    import vlmunr_render as rnd  # PURE geometry helpers (no bpy at module top)
+    import render as rnd  # PURE geometry helpers (no bpy at module top)
 
     floor_verts = rnd.shell_floor_verts3d(spec)
     floor_mat = _floor_material(bpy)
     if len(floor_verts) >= 3:
-        _add_mesh(bpy, "vlmunr_floor", floor_verts, [list(range(len(floor_verts)))], floor_mat)
+        _add_mesh(bpy, "hsm_floor", floor_verts, [list(range(len(floor_verts)))], floor_mat)
 
     wall_mat = _wall_backface_material(bpy)
     wall_quads = rnd.shell_wall_quads(spec)
@@ -120,4 +120,4 @@ def build_shell(bpy, spec: dict):
             base = len(all_verts)
             all_verts.extend(q)
             faces.append([base, base + 1, base + 2, base + 3])
-        _add_mesh(bpy, "vlmunr_walls", all_verts, faces, wall_mat)
+        _add_mesh(bpy, "hsm_walls", all_verts, faces, wall_mat)
