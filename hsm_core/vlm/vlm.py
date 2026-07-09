@@ -13,9 +13,9 @@ def register_vlm_backend(name: str, factory_func: Callable):
     _VLM_REGISTRY[name] = factory_func
 
 def create_session(
-    prompts_path: str, 
-    model_type: str = "gpt", 
-    model_name: str = "gpt-5.1-2025-11-13",
+    prompts_path: str,
+    model_type: str = "gpt",
+    model_name: str = None,
     temperature: float = 0.7, 
     output_dir: str = "", 
     prompt_info: Dict[str, str] = {},
