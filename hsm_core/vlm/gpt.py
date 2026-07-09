@@ -1,7 +1,7 @@
 from __future__ import annotations
 import base64
 import io
-import json
+import json as _json
 from typing import List, Union
 
 from matplotlib.figure import Figure
@@ -257,8 +257,8 @@ class Session(BaseVLMSession):
                     # Validate now so a malformed-but-non-empty response is retried
                     # rather than thrown one frame up by the caller's json.loads().
                     try:
-                        json.loads(response)
-                    except json.JSONDecodeError:
+                        _json.loads(response)
+                    except _json.JSONDecodeError:
                         self.logger.info(
                             "Received non-JSON response, retrying... "
                             "(Attempt %d/%d)", retries + 1, max_retries
