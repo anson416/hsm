@@ -293,16 +293,19 @@ def _apply_data_paths(hssd_dir: str | None, data_dir: str | None) -> tuple[Path,
     # call time from the module attribute, so reassigning the module global works.
     try:
         import hsm_core.support_region.loader as _sl
+
         _sl.SUPPORT_DIR = hssd_path / "support-surfaces"
     except Exception:
         pass
     try:
         import hsm_core.retrieval.model.embeddings as _emb
+
         _emb.EMBEDDING_PATH = data_path / "preprocessed"
     except Exception:
         pass
     try:
         import hsm_core.scene_motif.utils.library as _lib
+
         _lib.LIB_META_PROGRAMS_DIR = data_path / "motif_library" / "meta_programs"
     except Exception:
         pass
@@ -355,9 +358,13 @@ def _apply_llm_env(args: argparse.Namespace) -> None:
         os.environ["OPENAI_TEMPERATURE"] = str(args.temperature)
 
 
-def _write_config_json(run_dir: Path, args: argparse.Namespace,
-                       cfg: DictConfig | ListConfig,
-                       hssd_path: Path, data_path: Path) -> Path:
+def _write_config_json(
+    run_dir: Path,
+    args: argparse.Namespace,
+    cfg: DictConfig | ListConfig,
+    hssd_path: Path,
+    data_path: Path,
+) -> Path:
     """Persist the prompt + all configs (incl. data paths) for reproducibility."""
     config_path = run_dir / "config.json"
     has_key = bool(args.api_key or os.environ.get("OPENAI_API_KEY"))
@@ -377,7 +384,9 @@ def _write_config_json(run_dir: Path, args: argparse.Namespace,
         "variant_seed": args.seed,
         "render": args.render,
         "render_all": args.render_all,
-        "render_mode": "all" if args.render_all else ("single" if args.render else None),
+        "render_mode": "all"
+        if args.render_all
+        else ("single" if args.render else None),
         "hsm_config": OmegaConf.to_container(cfg, resolve=True),
         "run_dir": str(run_dir),
     }
@@ -394,9 +403,9 @@ def _write_config_json(run_dir: Path, args: argparse.Namespace,
 async def _run_pipeline(cfg: DictConfig | ListConfig, run_dir: Path, logger) -> dict:
     """Run setup + stages + cleanup, returning the final context (holds the Scene)."""
     from hsm_core.scene.processing import (
-        setup_scene_generation,
         create_processing_pipeline,
         process_cleanup_stage,
+        setup_scene_generation,
     )
 
     start_time = time.time()
@@ -409,9 +418,10 @@ async def _run_pipeline(cfg: DictConfig | ListConfig, run_dir: Path, logger) -> 
     base_dir.mkdir(parents=True, exist_ok=True)
 
     context = await setup_scene_generation(
-        cfg, project_root=PROJECT_ROOT,
+        cfg,
+        project_root=PROJECT_ROOT,
         output_dir_override=base_dir,  # write everything under outputs/<timestamp>/base/
-        timestamp=False,               # base_dir IS the dir; no extra timestamp subdir
+        timestamp=False,  # base_dir IS the dir; no extra timestamp subdir
     )
     context["start_time"] = start_time
     pipeline = create_processing_pipeline(cfg, context["is_loaded_scene"])
@@ -454,7 +464,8 @@ def _generate_variants(run_dir: Path, seed: int, logger) -> dict:
     if not hsm_path.exists() and not stk_path.exists():
         logger.warning(
             "No scene-state file found in %s; skipping variants. "
-            "(Generation may not have placed any objects.)", base_dir
+            "(Generation may not have placed any objects.)",
+            base_dir,
         )
         return {}
     written = var.generate_named_variants(run_dir, seed=seed, source_subdir="base")
@@ -503,10 +514,7 @@ def _render_configs_for_mode(mode: str) -> list:
     return [rcfg.single_render_config()]
 
 
-def _render_subfolders(
-    run_dir: Path, mode: str,
-    hssd_dir: str | None, logger
-) -> int:
+def _render_subfolders(run_dir: Path, mode: str, hssd_dir: str | None, logger) -> int:
     """Render base/ + each variant_* subfolder in-process (bpy lives in the hsm
     env). Returns the number of subfolders rendered successfully."""
     import render as renderer
@@ -514,7 +522,9 @@ def _render_subfolders(
     subdirs = _discover_render_subdirs(run_dir)
     if not subdirs:
         logger.warning("No renderable scene subfolders found under %s", run_dir)
-        print(f"(render: no base/ or variant_*/ with a scene-state file under {run_dir})")
+        print(
+            f"(render: no base/ or variant_*/ with a scene-state file under {run_dir})"
+        )
         return 0
 
     configs = _render_configs_for_mode(mode)
@@ -544,56 +554,104 @@ def _parse_args(argv=None) -> argparse.Namespace:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
-    p.add_argument("-p", "--prompt", default=None,
-                   help="Textual scene description (the LLM prompt). Exactly one of "
-                        "--prompt / --path must be given.")
-    p.add_argument("--path", default=None,
-                   help="Path to an EXISTING run dir (outputs/<datetime>/) to render — "
-                        "no generation. Exactly one of --prompt / --path must be given.")
-    p.add_argument("--base-url", default=None,
-                   help="OpenAI-compatible base URL for the LLM (env: OPENAI_BASE_URL). "
-                        "Default official: https://api.openai.com/v1")
-    p.add_argument("--api-key", default=None,
-                   help="API key for the LLM (env: OPENAI_API_KEY, also read from .env).")
-    p.add_argument("--model", default=None,
-                   help="LLM model name, e.g. gpt-4o-2024-08-06 (env: OPENAI_MODEL). "
-                        "Default: gpt-5.1-2025-11-13.")
-    p.add_argument("--temperature", type=float, default=None,
-                   help="LLM sampling temperature (env: OPENAI_TEMPERATURE). Default 0.7.")
-    p.add_argument("--hssd-dir", default=None,
-                   help="HSSD 3D-models root dir (contains objects/, support-surfaces/). "
-                        "Default: data/hssd-models. ~72GB dataset — see top docstring.")
-    p.add_argument("--data-dir", default=None,
-                   help="HSM data root dir (contains preprocessed/, motif_library/). "
-                        "Default: data. See top docstring.")
-    p.add_argument("--output", default="outputs",
-                   help="Root output folder (a dated sub-folder is created inside it).")
-    p.add_argument("--variants", action="store_true",
-                   help="Also generate the four content variants (half / biggest-only / "
-                        "scrambled / worst-object) from the base scene.")
-    p.add_argument("--seed", type=int, default=42,
-                   help="Seed for the deterministic variant generators (default 42).")
-    p.add_argument("--render", action="store_true",
-                   help="Render the scene(s) with Blender at the baseline config (512px, "
-                        "white bg, 50mm, pitch 0 / top-down, yaw 0, city env). With --prompt, "
-                        "renders the generated base (+ variants if --variants); with --path, "
-                        "renders base/ + every variant_* already present. Mutually exclusive "
-                        "with --render-all.")
-    p.add_argument("--render-all", action="store_true",
-                   help="Render the full six-factor sweep (resolution / focal / pitch / yaw / "
-                        "env / background) for each scene subfolder. Same source rules as "
-                        "--render. Mutually exclusive with --render.")
+    p.add_argument(
+        "-p",
+        "--prompt",
+        default=None,
+        help="Textual scene description (the LLM prompt). Exactly one of "
+        "--prompt / --path must be given.",
+    )
+    p.add_argument(
+        "--path",
+        default=None,
+        help="Path to an EXISTING run dir (outputs/<datetime>/) to render — "
+        "no generation. Exactly one of --prompt / --path must be given.",
+    )
+    p.add_argument(
+        "--base-url",
+        default=None,
+        help="OpenAI-compatible base URL for the LLM (env: OPENAI_BASE_URL). "
+        "Default official: https://api.openai.com/v1",
+    )
+    p.add_argument(
+        "--api-key",
+        default=None,
+        help="API key for the LLM (env: OPENAI_API_KEY, also read from .env).",
+    )
+    p.add_argument(
+        "--model",
+        default=None,
+        help="LLM model name, e.g. gpt-4o-2024-08-06 (env: OPENAI_MODEL). "
+        "Default: gpt-5.1-2025-11-13.",
+    )
+    p.add_argument(
+        "--temperature",
+        type=float,
+        default=None,
+        help="LLM sampling temperature (env: OPENAI_TEMPERATURE). Default 0.7.",
+    )
+    p.add_argument(
+        "--hssd-dir",
+        default=None,
+        help="HSSD 3D-models root dir (contains objects/, support-surfaces/). "
+        "Default: data/hssd-models. ~72GB dataset — see top docstring.",
+    )
+    p.add_argument(
+        "--data-dir",
+        default=None,
+        help="HSM data root dir (contains preprocessed/, motif_library/). "
+        "Default: data. See top docstring.",
+    )
+    p.add_argument(
+        "--output",
+        default="outputs",
+        help="Root output folder (a dated sub-folder is created inside it).",
+    )
+    p.add_argument(
+        "--variants",
+        action="store_true",
+        help="Also generate the four content variants (half / biggest-only / "
+        "scrambled / worst-object) from the base scene.",
+    )
+    p.add_argument(
+        "--seed",
+        type=int,
+        default=42,
+        help="Seed for the deterministic variant generators (default 42).",
+    )
+    p.add_argument(
+        "--render",
+        action="store_true",
+        help="Render the scene(s) with Blender at the baseline config (512px, "
+        "white bg, 50mm, pitch 0 / top-down, yaw 0, city env). With --prompt, "
+        "renders the generated base (+ variants if --variants); with --path, "
+        "renders base/ + every variant_* already present. Mutually exclusive "
+        "with --render-all.",
+    )
+    p.add_argument(
+        "--render-all",
+        action="store_true",
+        help="Render the full six-factor sweep (resolution / focal / pitch / yaw / "
+        "env / background) for each scene subfolder. Same source rules as "
+        "--render. Mutually exclusive with --render.",
+    )
     return p.parse_args(argv)
 
 
 def _validate_args(args: argparse.Namespace) -> None:
     """Enforce mutual exclusions: exactly one of --prompt/--path; not both render flags."""
     if (args.prompt is None) == (args.path is None):
-        raise SystemExit("error: pass exactly one of --prompt (generate) or --path (render existing).")
+        raise SystemExit(
+            "error: pass exactly one of --prompt (generate) or --path (render existing)."
+        )
     if args.render and args.render_all:
-        raise SystemExit("error: --render and --render-all are mutually exclusive; pick one.")
+        raise SystemExit(
+            "error: --render and --render-all are mutually exclusive; pick one."
+        )
     if args.path and args.variants:
-        print("(note: --variants is a generation flag; ignored in --path (render-only) mode)")
+        print(
+            "(note: --variants is a generation flag; ignored in --path (render-only) mode)"
+        )
 
 
 def main(argv=None) -> int:
@@ -627,7 +685,9 @@ def main(argv=None) -> int:
 
     print("HSM CLI — scene generation started")
     print(f"Prompt:    {args.prompt}")
-    print(f"Model:     {args.model or os.environ.get('OPENAI_MODEL') or '(default gpt-5.1)'}")
+    print(
+        f"Model:     {args.model or os.environ.get('OPENAI_MODEL') or '(default gpt-5.1)'}"
+    )
     print(f"HSSD dir:  {hssd_path}  (exists: {hssd_path.exists()})")
     print(f"Data dir:  {data_path}  (exists: {data_path.exists()})")
 
@@ -655,10 +715,14 @@ def main(argv=None) -> int:
         except Exception as e:
             logger.error(f"Variant generation failed: {e}")
             logger.error(traceback.format_exc())
-            print(f"Variant generation failed at {stamp} — base scene still saved in {run_dir}")
+            print(
+                f"Variant generation failed at {stamp} — base scene still saved in {run_dir}"
+            )
             # Don't fail the whole run: the base scene succeeded.
     else:
-        print("(skip variants — pass --variants to also generate the four content variants)")
+        print(
+            "(skip variants — pass --variants to also generate the four content variants)"
+        )
 
     n_objs = 0
     try:
@@ -688,6 +752,7 @@ def main(argv=None) -> int:
 def get_logger_safe():
     """Get a logger without forcing heavy imports at module load."""
     from hsm_core.utils import get_logger
+
     return get_logger("hsm_cli")
 
 
