@@ -1,18 +1,18 @@
 from __future__ import annotations
+
 import base64
 import io
 import json as _json
+import os
 from typing import List, Union
 
-from matplotlib.figure import Figure
 from dotenv import load_dotenv
+from matplotlib.figure import Figure
 from openai import OpenAI
 from PIL import Image
 
 from .base_session import BaseVLMSession
-from .utils import extract_json, extract_code, extract_program
-
-import os
+from .utils import extract_code, extract_json, extract_program
 
 MODEL: str = "gpt-5.1-2025-11-13"
 # MODEL: str = "gpt-4o-2024-08-06"
@@ -53,11 +53,14 @@ def _env_float(name: str, default: float) -> float:
 class Session(BaseVLMSession):
     """GPT-based VLM session using OpenAI API."""
 
-    def __init__(self, prompts_path,
-                 model=None,
-                 temperature: float | None = None,
-                 output_dir: str = "",
-                 prompt_info: dict[str, str] | None = None) -> None:
+    def __init__(
+        self,
+        prompts_path,
+        model=None,
+        temperature: float | None = None,
+        output_dir: str = "",
+        prompt_info: dict[str, str] | None = None,
+    ) -> None:
         """
         Initialize a GPT Session.
 
@@ -69,11 +72,12 @@ class Session(BaseVLMSession):
         load_dotenv()
         # Resolve base_url + api_key from env (explicit None -> OpenAI default).
         _base_url = os.environ.get("OPENAI_BASE_URL")
-        _api_key = (
-            os.environ.get("OPENAI_API_KEY")
-            or os.environ.get("CHATANYWHERE_API_KEY")
+        _api_key = os.environ.get("OPENAI_API_KEY") or os.environ.get(
+            "CHATANYWHERE_API_KEY"
         )
-        self.client = OpenAI(base_url=_base_url if _base_url else None, api_key=_api_key)
+        self.client = OpenAI(
+            base_url=_base_url if _base_url else None, api_key=_api_key
+        )
         # model: explicit arg wins, else env, else module default.
         resolved_model = model or os.environ.get("OPENAI_MODEL") or DEFAULT_MODEL
         # temperature: explicit arg wins, else env, else 0.7.
@@ -81,11 +85,18 @@ class Session(BaseVLMSession):
             temperature = _env_float("OPENAI_TEMPERATURE", 0.7)
         self.model = resolved_model
         super().__init__(prompts_path, self.model, temperature, output_dir, prompt_info)
-    
-    def send(self, task: str, prompt_info: dict[str, str] | None = None,
-             info_validate: bool = True, is_json: bool = False, verbose: bool = False,
-             images: str | Figure | List[str | Figure] | None = None,
-             image_detail: str = "high", append_text: str = "") -> str:
+
+    def send(
+        self,
+        task: str,
+        prompt_info: dict[str, str] | None = None,
+        info_validate: bool = True,
+        is_json: bool = False,
+        verbose: bool = False,
+        images: str | Figure | List[str | Figure] | None = None,
+        image_detail: str = "high",
+        append_text: str = "",
+    ) -> str:
         """
         Send a message of a specific task to the VLM model and return the response.
 
@@ -113,7 +124,9 @@ class Session(BaseVLMSession):
             num_images = len(images) if isinstance(images, list) else 1
         else:
             num_images = 0
-        self.logger.debug(f"Past messages: {len(self.past_messages)} Prompt length: {len(prompt)} with {num_images} images")
+        self.logger.debug(
+            f"Past messages: {len(self.past_messages)} Prompt length: {len(prompt)} with {num_images} images"
+        )
         if verbose:
             self.logger.debug(f"Prompt:\n{prompt}")
         self._send(prompt, is_json, images, image_detail)
@@ -133,8 +146,12 @@ class Session(BaseVLMSession):
             buf.seek(0)
             img = Image.open(buf)
         else:
-            self.logger.debug(f"Unsupported image type: {type(image_or_path)}, value: {image_or_path}")
-            raise ValueError(f"Warning: Unsupported image type: {type(image_or_path)}. Please provide a file path or a matplotlib Figure.")
+            self.logger.debug(
+                f"Unsupported image type: {type(image_or_path)}, value: {image_or_path}"
+            )
+            raise ValueError(
+                f"Warning: Unsupported image type: {type(image_or_path)}. Please provide a file path or a matplotlib Figure."
+            )
 
         # Optimize image size based on detail level
         if detail == "low":
@@ -150,7 +167,7 @@ class Session(BaseVLMSession):
 
         # Preserve aspect ratio while resizing
         img.thumbnail(target_size, Image.Resampling.LANCZOS)
-        
+
         # removes alpha channel (Ref: https://www.oranlooney.com/post/gpt-cnn/)
         if img.mode in ("RGBA", "LA"):
             background = Image.new("RGB", img.size, (255, 255, 255))
@@ -177,68 +194,75 @@ class Session(BaseVLMSession):
         first_newline = stripped.find("\n")
         if first_newline == -1:
             return text
-        inner = stripped[first_newline + 1:]
+        inner = stripped[first_newline + 1 :]
         # Drop a trailing fence if present.
         if inner.rstrip().endswith("```"):
             inner = inner.rstrip()[:-3]
         return inner.strip()
 
-    def _send(self, new_message: str, json: bool = False,
-              images: Union[str, Figure, List[Union[str, Figure]], None] = None,
-              image_detail="high") -> None:
+    def _send(
+        self,
+        new_message: str,
+        json: bool = False,
+        images: Union[str, Figure, List[Union[str, Figure]], None] = None,
+        image_detail="high",
+    ) -> None:
         """Send message to VLM models with image."""
         message_content = []
-        
+
         # Add text content first
         if new_message.strip():
-            message_content.append({
-                "type": "text",
-                "text": new_message
-            })
-        
+            message_content.append({"type": "text", "text": new_message})
+
         # Handle multiple images
         if images is not None:
             # Convert single image to list for uniform processing and filter out None values
             image_list_raw = images if isinstance(images, list) else [images]
             image_list = [img for img in image_list_raw if img is not None]
-            
+
             for image in image_list:
                 try:
                     image_base64 = self._encode_image(image, detail=image_detail)
                 except ValueError as exc:
                     self.logger.warning(
-                        "Skipping unsupported image in _send (type=%s): %s", type(image), exc
+                        "Skipping unsupported image in _send (type=%s): %s",
+                        type(image),
+                        exc,
                     )
                     continue
                 if image_base64 is None:
                     continue
 
-                message_content.append({
-                    "type": "image_url",
-                    "image_url": {
-                    "url": f"data:image/png;base64,{image_base64}",
-                    "detail": image_detail
-                }
-            })
+                message_content.append(
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:image/png;base64,{image_base64}",
+                            "detail": image_detail,
+                        },
+                    }
+                )
 
         self.past_messages.append({"role": "user", "content": message_content})
-        
+
         retries = 0
-        max_retries = 3
+        max_retries = 10
         while retries < max_retries:
             params = {
                 "model": self.model,
                 "messages": self.past_messages,
-                "response_format": { "type": "json_object" } if json else None,
-                "temperature": self.temperature if self.model not in REASONING_MODELS else 1.0
+                "response_format": {"type": "json_object"} if json else None,
+                "temperature": self.temperature
+                if self.model not in REASONING_MODELS
+                else 1.0,
             }
 
             if self.model in REASONING_MODELS:
                 params["reasoning_effort"] = "high"
-            
+
             completion = self.client.chat.completions.create(**params)
             response = completion.choices[0].message.content
-            
+
             if completion.usage:
                 self.total_prompt_tokens += completion.usage.prompt_tokens
                 self.total_completion_tokens += completion.usage.completion_tokens
@@ -260,8 +284,9 @@ class Session(BaseVLMSession):
                         _json.loads(response)
                     except _json.JSONDecodeError:
                         self.logger.info(
-                            "Received non-JSON response, retrying... "
-                            "(Attempt %d/%d)", retries + 1, max_retries
+                            "Received non-JSON response, retrying... (Attempt %d/%d)",
+                            retries + 1,
+                            max_retries,
                         )
                         retries += 1
                         continue
@@ -269,7 +294,12 @@ class Session(BaseVLMSession):
                 self.past_responses.append(response)
                 return
 
-            self.logger.info(f"Received empty response, retrying... (Attempt {retries + 1}/{max_retries})")
+            self.logger.info(
+                f"Received empty response, retrying... (Attempt {retries + 1}/{max_retries})"
+            )
             retries += 1
-            
-        raise RuntimeError(f"Failed to get a valid response after {max_retries} attempts")
+
+        raise RuntimeError(
+            f"Failed to get a valid response after {max_retries} attempts"
+        )
+
