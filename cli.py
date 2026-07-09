@@ -13,7 +13,7 @@ scene or re-calling the LLM:
                              so each object's 3D asset is swapped for the worst match
 
 The LLM connection (--base-url/--api-key/--model/--temperature) is wired through
-the VLMUNR_OPENAI_* env vars, which hsm_core.vlm.gpt.Session reads at construction.
+the OPENAI_* env vars, which hsm_core.vlm.gpt.Session reads at construction.
 
 Output layout (per run), under ./outputs/ :
 
@@ -110,8 +110,8 @@ completions API (any OpenAI-compatible endpoint works).
     a) CLI flags:  --api-key sk-... --base-url https://api.openai.com/v1 \
                       --model gpt-4o-2024-08-06 --temperature 0.7
     b) Environment variables (the CLI exports these for the pipeline):
-         VLMUNR_OPENAI_API_KEY, VLMUNR_OPENAI_BASE_URL,
-         VLMUNR_OPENAI_MODEL, VLMUNR_OPENAI_TEMPERATURE
+         OPENAI_API_KEY, OPENAI_BASE_URL,
+         OPENAI_MODEL, OPENAI_TEMPERATURE
     c) A `.env` file in the repo root with OPENAI_API_KEY=sk-...  (gpt.py calls
        load_dotenv(); OPENAI_API_KEY is read as a fallback for the API key).
 
@@ -336,7 +336,7 @@ def _build_config(args: argparse.Namespace) -> DictConfig | ListConfig:
     cfg = parser.get_config(ns)
 
     # Inject an `llm` block so model-type routing picks 'gpt'. The actual model
-    # name / temperature reach the Session via VLMUNR_OPENAI_* env vars (set in
+    # name / temperature reach the Session via OPENAI_* env vars (set in
     # _apply_llm_env), which every create_session() site reads uniformly.
     cfg.llm = OmegaConf.create({"model_type": "gpt", "model_name": args.model})
     cfg.execution.result_dir = str(Path(args.output).resolve())
@@ -344,15 +344,15 @@ def _build_config(args: argparse.Namespace) -> DictConfig | ListConfig:
 
 
 def _apply_llm_env(args: argparse.Namespace) -> None:
-    """Export VLMUNR_OPENAI_* env vars consumed by hsm_core.vlm.gpt.Session."""
+    """Export OPENAI_* env vars consumed by hsm_core.vlm.gpt.Session."""
     if args.base_url is not None:
-        os.environ["VLMUNR_OPENAI_BASE_URL"] = args.base_url
+        os.environ["OPENAI_BASE_URL"] = args.base_url
     if args.api_key is not None:
-        os.environ["VLMUNR_OPENAI_API_KEY"] = args.api_key
+        os.environ["OPENAI_API_KEY"] = args.api_key
     if args.model is not None:
-        os.environ["VLMUNR_OPENAI_MODEL"] = args.model
+        os.environ["OPENAI_MODEL"] = args.model
     if args.temperature is not None:
-        os.environ["VLMUNR_OPENAI_TEMPERATURE"] = str(args.temperature)
+        os.environ["OPENAI_TEMPERATURE"] = str(args.temperature)
 
 
 def _write_config_json(run_dir: Path, args: argparse.Namespace,
@@ -360,13 +360,12 @@ def _write_config_json(run_dir: Path, args: argparse.Namespace,
                        hssd_path: Path, data_path: Path) -> Path:
     """Persist the prompt + all configs (incl. data paths) for reproducibility."""
     config_path = run_dir / "config.json"
-    has_key = bool(args.api_key or os.environ.get("VLMUNR_OPENAI_API_KEY")
-                   or os.environ.get("OPENAI_API_KEY"))
+    has_key = bool(args.api_key or os.environ.get("OPENAI_API_KEY"))
     payload = {
         "prompt": args.prompt,
         "llm": {
-            "base_url": args.base_url or os.environ.get("VLMUNR_OPENAI_BASE_URL"),
-            "model": args.model or os.environ.get("VLMUNR_OPENAI_MODEL"),
+            "base_url": args.base_url or os.environ.get("OPENAI_BASE_URL"),
+            "model": args.model or os.environ.get("OPENAI_MODEL"),
             "temperature": args.temperature if args.temperature is not None else 0.7,
             "api_key": "<redacted>" if has_key else None,
         },
@@ -552,15 +551,15 @@ def _parse_args(argv=None) -> argparse.Namespace:
                    help="Path to an EXISTING run dir (outputs/<datetime>/) to render — "
                         "no generation. Exactly one of --prompt / --path must be given.")
     p.add_argument("--base-url", default=None,
-                   help="OpenAI-compatible base URL for the LLM (env: VLMUNR_OPENAI_BASE_URL). "
+                   help="OpenAI-compatible base URL for the LLM (env: OPENAI_BASE_URL). "
                         "Default official: https://api.openai.com/v1")
     p.add_argument("--api-key", default=None,
-                   help="API key for the LLM (env: VLMUNR_OPENAI_API_KEY, or OPENAI_API_KEY in .env).")
+                   help="API key for the LLM (env: OPENAI_API_KEY, also read from .env).")
     p.add_argument("--model", default=None,
-                   help="LLM model name, e.g. gpt-4o-2024-08-06 (env: VLMUNR_OPENAI_MODEL). "
+                   help="LLM model name, e.g. gpt-4o-2024-08-06 (env: OPENAI_MODEL). "
                         "Default: gpt-5.1-2025-11-13.")
     p.add_argument("--temperature", type=float, default=None,
-                   help="LLM sampling temperature (env: VLMUNR_OPENAI_TEMPERATURE). Default 0.7.")
+                   help="LLM sampling temperature (env: OPENAI_TEMPERATURE). Default 0.7.")
     p.add_argument("--hssd-dir", default=None,
                    help="HSSD 3D-models root dir (contains objects/, support-surfaces/). "
                         "Default: data/hssd-models. ~72GB dataset — see top docstring.")
@@ -628,7 +627,7 @@ def main(argv=None) -> int:
 
     print("HSM CLI — scene generation started")
     print(f"Prompt:    {args.prompt}")
-    print(f"Model:     {args.model or os.environ.get('VLMUNR_OPENAI_MODEL') or '(default gpt-5.1)'}")
+    print(f"Model:     {args.model or os.environ.get('OPENAI_MODEL') or '(default gpt-5.1)'}")
     print(f"HSSD dir:  {hssd_path}  (exists: {hssd_path.exists()})")
     print(f"Data dir:  {data_path}  (exists: {data_path.exists()})")
 

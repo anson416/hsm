@@ -22,10 +22,10 @@ MODEL: str = "gpt-5.1-2025-11-13"
 # the default OpenAI endpoint. When pointing at chatanywhere, also export
 # OPENAI_API_KEY=$CHATANYWHERE_API_KEY so the client authenticates correctly.
 # All four of base_url / api_key / model / temperature may be overridden via the
-# VLMUNR_OPENAI_* env vars (set by cli.py from its --base-url/--api-key/
-# --model/--temperature flags) so the whole pipeline picks them up without
-# threading parameters through every create_session() call site.
-CUSTOM_URL: str = os.environ.get("VLMUNR_OPENAI_BASE_URL", "https://api.chatanywhere.tech/v1")
+# OPENAI_* env vars (set by cli.py from its --base-url/--api-key/--model/
+# --temperature flags) so the whole pipeline picks them up without threading
+# parameters through every create_session() call site.
+CUSTOM_URL: str = os.environ.get("OPENAI_BASE_URL", "https://api.chatanywhere.tech/v1")
 
 DEFAULT_MODEL: str = "gpt-5.1-2025-11-13"
 REASONING_MODELS: list[str] = [
@@ -61,24 +61,23 @@ class Session(BaseVLMSession):
         Initialize a GPT Session.
 
         Endpoint / API key / model / temperature resolution order:
-          explicit arg -> VLMUNR_OPENAI_* env var -> module default.
+          explicit arg -> OPENAI_* env var -> module default.
         This lets cli.py set the env vars once and have every Session
         created across the pipeline pick them up.
         """
         load_dotenv()
         # Resolve base_url + api_key from env (explicit None -> OpenAI default).
-        _base_url = os.environ.get("VLMUNR_OPENAI_BASE_URL")
+        _base_url = os.environ.get("OPENAI_BASE_URL")
         _api_key = (
-            os.environ.get("VLMUNR_OPENAI_API_KEY")
-            or os.environ.get("OPENAI_API_KEY")
+            os.environ.get("OPENAI_API_KEY")
             or os.environ.get("CHATANYWHERE_API_KEY")
         )
         self.client = OpenAI(base_url=_base_url if _base_url else None, api_key=_api_key)
         # model: explicit arg wins, else env, else module default.
-        resolved_model = model or os.environ.get("VLMUNR_OPENAI_MODEL") or DEFAULT_MODEL
+        resolved_model = model or os.environ.get("OPENAI_MODEL") or DEFAULT_MODEL
         # temperature: explicit arg wins, else env, else 0.7.
         if temperature is None:
-            temperature = _env_float("VLMUNR_OPENAI_TEMPERATURE", 0.7)
+            temperature = _env_float("OPENAI_TEMPERATURE", 0.7)
         self.model = resolved_model
         super().__init__(prompts_path, self.model, temperature, output_dir, prompt_info)
     
