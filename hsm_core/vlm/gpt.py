@@ -1,6 +1,7 @@
 from __future__ import annotations
 import base64
 import io
+import json
 from typing import List, Union
 
 from matplotlib.figure import Figure
@@ -161,7 +162,28 @@ class Session(BaseVLMSession):
         buf.seek(0)
         return base64.b64encode(buf.getvalue()).decode("utf-8")
 
-    def _send(self, new_message: str, json: bool = False, 
+    @staticmethod
+    def _strip_code_fences(text: str) -> str:
+        """Strip a surrounding markdown code fence (```...```) from a model response.
+
+        Some non-OpenAI models wrap JSON output in ```json ... ``` fences even when
+        json mode is requested; json.loads() then fails at char 0. Strip the fence so
+        downstream parsing succeeds.
+        """
+        stripped = text.strip()
+        if not stripped.startswith("```"):
+            return text
+        # Drop the opening fence (with optional language tag, e.g. ```json).
+        first_newline = stripped.find("\n")
+        if first_newline == -1:
+            return text
+        inner = stripped[first_newline + 1:]
+        # Drop a trailing fence if present.
+        if inner.rstrip().endswith("```"):
+            inner = inner.rstrip()[:-3]
+        return inner.strip()
+
+    def _send(self, new_message: str, json: bool = False,
               images: Union[str, Figure, List[Union[str, Figure]], None] = None,
               image_detail="high") -> None:
         """Send message to VLM models with image."""
@@ -221,13 +243,33 @@ class Session(BaseVLMSession):
                 self.total_prompt_tokens += completion.usage.prompt_tokens
                 self.total_completion_tokens += completion.usage.completion_tokens
                 self.total_tokens_this_session += completion.usage.total_tokens
-            
+
+            # Treat empty/whitespace-only content the same as None: a failed response
+            # that should be retried, rather than handing "" to a downstream json.loads
+            # ("Expecting value: line 1 column 1 (char 0)").
             if response is not None:
+                response = response.strip()
+            if response:
+                # Some non-OpenAI models wrap JSON in ```json ... ``` fences even
+                # under json mode; strip so json.loads() succeeds downstream.
+                if json:
+                    response = self._strip_code_fences(response)
+                    # Validate now so a malformed-but-non-empty response is retried
+                    # rather than thrown one frame up by the caller's json.loads().
+                    try:
+                        json.loads(response)
+                    except json.JSONDecodeError:
+                        self.logger.info(
+                            "Received non-JSON response, retrying... "
+                            "(Attempt %d/%d)", retries + 1, max_retries
+                        )
+                        retries += 1
+                        continue
                 self.past_messages.append({"role": "assistant", "content": response})
                 self.past_responses.append(response)
                 return
 
-            self.logger.info(f"Received None response, retrying... (Attempt {retries + 1}/{max_retries})")
+            self.logger.info(f"Received empty response, retrying... (Attempt {retries + 1}/{max_retries})")
             retries += 1
             
         raise RuntimeError(f"Failed to get a valid response after {max_retries} attempts")

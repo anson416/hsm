@@ -89,7 +89,16 @@ class SceneSpec:
         Returns:
             SceneSpec: The constructed scene spec with correct IDs and flags.
         """
-        data = json.loads(json_str)
+        try:
+            data = json.loads(json_str)
+        except json.JSONDecodeError as e:
+            preview = (json_str[:200] + "...") if len(json_str) > 200 else json_str
+            raise json.JSONDecodeError(
+                f"Failed to parse SceneSpec JSON (model returned empty or non-JSON output). "
+                f"Content preview: {preview!r}",
+                e.doc,
+                e.pos,
+            ) from e
 
         def parse_objects(obj_data_list: Optional[list[dict[str, Any]]]) -> list[ObjectSpec]:
             parsed_list: list[ObjectSpec] = []
