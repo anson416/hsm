@@ -177,6 +177,89 @@ results/
 **Note**: Do not use the GLB file for evaluation, as the origin of the room geometry is misaligned.
 
 
+## Rendering & content variants (`cli.py`)
+
+Beyond plain generation (`main.py`), `cli.py` is a single end-to-end driver that
+generates a scene from a text prompt, optionally writes four content variants
+derived from the base scene **without re-calling the LLM**, and optionally
+renders the scene(s) with headless Blender (bpy) — all in-process under the `hsm`
+env (bpy co-installs with torch; install it via the `[render]` extra or it is
+already in `environment.yml`).
+
+```bash
+conda activate hsm
+# generate + variants + render the baseline of each scene:
+python cli.py --prompt "A cozy bedroom with a bed, nightstand, and a wardrobe." \
+    --base-url https://api.openai.com/v1 --api-key sk-... \
+    --model gpt-4o-2024-08-06 --temperature 0.7 --variants --render
+# generate + variants + render the FULL six-factor sweep:
+python cli.py --prompt "..." --variants --render-all
+# render an EXISTING run (no generation) — base/ + every variant_*:
+python cli.py --path outputs/20260708-023434 --render-all
+```
+
+Flags: `--prompt` (generate) **or** `--path` (render existing) — exactly one;
+`--base-url`, `--api-key`, `--model`, `--temperature` (LLM; also settable via the
+`OPENAI_*` env vars / `.env`); `--hssd-dir`, `--data-dir` (dataset overrides);
+`--output` (default `outputs`); `--variants`; `--seed` (default 42); `--render`
+(baseline render) **or** `--render-all` (six-factor sweep) — mutually exclusive.
+Run `python cli.py --help` for the complete external-resources list (LLM API,
+HSSD models, preprocessed retrieval data, support-surface data, motif library,
+CLIP).
+
+### Output layout (per run, under `outputs/<YYYYMMDD-HHMMSS>/`, UTC stamp)
+
+```
+outputs/<datetime>/
+├── config.json                       prompt + all CLI/LLM/data configs
+├── base/                             the generated BASE scene
+│   ├── room_scene.glb
+│   ├── hsm_scene_state.json          base scene state (mesh_path + pose)
+│   ├── stk_scene_state.json          base scene state (column-major STK)
+│   ├── scene.log
+│   ├── visualizations/  scene_motifs/  renderings/   (renderings only if --render*)
+├── variant_01_half/                  (only with --variants)
+├── variant_02_biggest-only/
+├── variant_03_scrambled/
+└── variant_04_worst-object/
+```
+
+Each variant subfolder holds a standalone `hsm_scene_state.json` under the
+canonical name the renderer looks for, so any variant can be rendered on its own:
+
+```bash
+python render.py --scene-dir outputs/<stamp>/variant_03_scrambled
+# -> writes outputs/<stamp>/variant_03_scrambled/renderings/
+```
+
+The four variants: **01_half** keeps `round(n/2)` objects (seeded sample);
+**02_biggest-only** keeps the single largest object by bbox volume;
+**03_scrambled** randomizes every object's position AND heading in-room;
+**04_worst-object** re-runs HSM retrieval with the CLIP ranking inverted
+(`worst_match=True`) so each object's asset is swapped for the lowest-CLIP match
+— no LLM re-call. 04 degrades gracefully (keeps originals, records intent under
+`_worst_match`) when HSSD/CLIP/OpenAI are absent.
+
+### Render filename scheme + sweeps
+
+Written under `<scene-dir>/renderings/`. Each config renders one RGBA transparent
+master (env-map-lit), then alpha-composites every requested background color over
+it via PIL (two-stage recipe, `fit_ratio=1` tight-fit). Dollhouse walls use a
+backface-culling material so camera-facing (near) wall faces render transparent
+while far walls + their door/window openings stay visible.
+
+- **Transparent master**: `render_res-{R}_focal-{F}_pitch-{P}_yaw-{Y}_env-{ENV}.png`
+- **Composited per background**: `render_res-{R}_focal-{F}_pitch-{P}_yaw-{Y}_env-{ENV}_bg-{r}-{g}-{b}.png`
+
+`--render` produces the single baseline (512px, white bg, 50mm, pitch 0 / top-down,
+yaw 0, city env). `--render-all` produces the six deduped factor sweeps
+(resolution / focal / pitch / yaw / env / background); a camera config shared by
+several sweeps is rendered once and composited over the union of its backgrounds.
+Factor levels (paper Table 1) live in `render_config.py`. The PURE geometry
+(shell parsing, wall-quad tiling, STK decode) is in `render.py`; the bpy shell
+assembly in `render_shell.py`; the Blender helper library in `blender_bpa.py`.
+
+
 ## Evaluation
 
 We use [SceneEval](https://3dlg-hcvc.github.io/SceneEval/) to evaluate the scene generation quality and generate visuals in the paper.
