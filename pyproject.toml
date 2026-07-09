@@ -20,6 +20,7 @@ dependencies = [
     "trimesh>=4.5",
     "rtree>=1.2",
     "networkx>=3.0",
+    "python-fcl",
     # Retrieval / CLIP ranking (model_manager uses open_clip)
     "open_clip_torch>=2.24",
     "torch>=2.3",
@@ -70,10 +71,7 @@ render = [
 ]
 # Optional trimesh ray-tracing accelerator (speeds up support-region queries).
 accel = ["embreex"]
-dev = [
-    "pytest>=8.0",
-    "pytest-split",
-]
+dev = ["pytest>=8.0", "pytest-split"]
 
 [project.scripts]
 # End-to-end driver: generate (+ variants) and/or render from a text prompt or
@@ -84,7 +82,14 @@ hsm = "cli:main"
 # hsm_core/ is a namespace-style dir (no __init__.py) used via sys.path; discover
 # packages automatically. Top-level scripts (cli, render*) are installed as
 # modules so the `hsm` console script resolves.
-py-modules = ["cli", "blender_bpa", "render_config", "render", "render_shell", "scene_variants"]
+py-modules = [
+    "cli",
+    "blender_bpa",
+    "render_config",
+    "render",
+    "render_shell",
+    "scene_variants",
+]
 
 [tool.setuptools.packages.find]
 include = ["hsm_core*"]
