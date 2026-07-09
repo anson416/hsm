@@ -21,7 +21,8 @@ dependencies = [
     "rtree>=1.2",
     "networkx>=3.0",
     "python-fcl",
-    "mapbox-earcut",
+    "manifold3d",
+    "earcut",
     # Retrieval / CLIP ranking (model_manager uses open_clip)
     "open_clip_torch>=2.24",
     "torch>=2.3",
