@@ -586,6 +586,20 @@ def build_blender_scene(records: List[dict], shell_spec: dict) -> Tuple[object, 
             print(f"[render] WARNING: import failed for {mp}: {_e}; skipped.")
             missing.append(mp)
             continue
+        dims = rec.get("dimensions")
+        if dims:
+            # State dimensions are HSM Y-up (x, y_height, z). Blender is Z-up,
+            # so reorder to (x, z_depth, y_height) before normalizing, exactly
+            # like the assembly path that exported room_scene.glb.
+            try:
+                bpa.Builder.normalize(
+                    obj,
+                    dims=(float(dims[0]), float(dims[2]), float(dims[1])),
+                )
+            except Exception as _e:
+                print(f"[render] WARNING: normalize failed for {mp}: {_e}; skipped.")
+                missing.append(mp)
+                continue
         bpa.transform(obj, position=rec["position"], rotation=rec["rotation"])
         placed += 1
     if missing:
