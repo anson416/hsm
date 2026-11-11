@@ -277,11 +277,18 @@ class Session(BaseVLMSession):
                 # Some non-OpenAI models wrap JSON in ```json ... ``` fences even
                 # under json mode; strip so json.loads() succeeds downstream.
                 if json:
+                    _raw = response
                     response = self._strip_code_fences(response)
                     # Validate now so a malformed-but-non-empty response is retried
                     # rather than thrown one frame up by the caller's json.loads().
                     try:
-                        _json.loads(response)
+                        try:
+                            _json.loads(response)
+                        except _json.JSONDecodeError:
+                            _s = _raw.find('{'); _e = _raw.rfind('}')
+                            if _s != -1 and _e > _s:
+                                response = _raw[_s:_e+1]
+                            _json.loads(response)
                     except _json.JSONDecodeError:
                         self.logger.info(
                             "Received non-JSON response, retrying... (Attempt %d/%d)",
